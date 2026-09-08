@@ -1,0 +1,28 @@
+en:
+  # === Top-level keys (used via l(:key_name)) ===
+  project_module_document_generator: "Document Generator"
+  permission_use_document_generator: "Use Document Generator"
+  label_document_generator: "Document Generator"
+  error_gems_not_loaded: "Required libraries for document generation are not installed. Please contact the administrator."
+  label_dialog_placeholder: "The dialog will be implemented in the next stage."
+
+  # === document_generator block (used via l('document_generator.key_name')) ===
+  document_generator:
+    dialog_title: "Document Generator"
+    template_file: "Template file"
+    export_mode_single: "One file per record"
+    export_mode_combined: "Single document"
+    file_name: "File name"
+    error_behavior: "On template errors"
+    error_abort: "Abort export"
+    error_skip_field: "Skip field"
+    error_skip_record: "Skip record"
+    records_count: "Records to process: %{count}"
+    files_count: "Files to create: %{count}"
+    single_file: "1 file will be created"
+    button_export: "Export"
+    button_cancel: "Cancel"
+    error_invalid_filename: "File name contains invalid characters"
+    error_invalid_template: "Template error: %{message}"
+    error_no_records: "No records to export"
+    error_invalid_format: "Unsupported template file format"

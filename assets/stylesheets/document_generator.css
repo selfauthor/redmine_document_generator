@@ -1,0 +1,8 @@
+/* Стили для ссылки "Генератор документов" */
+.icon-document-generator {
+  text-decoration: none;
+}
+
+.icon-document-generator:hover {
+  text-decoration: underline;
+}

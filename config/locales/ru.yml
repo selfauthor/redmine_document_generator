@@ -1,0 +1,28 @@
+ru:
+  # === Ключи верхнего уровня (используются через l(:key_name)) ===
+  project_module_document_generator: "Генератор документов"
+  permission_use_document_generator: "Использовать генератор документов"
+  label_document_generator: "Генератор документов"
+  error_gems_not_loaded: "Не установлены необходимые библиотеки для генерации документов. Обратитесь к администратору."
+  label_dialog_placeholder: "Диалог будет реализован на следующем этапе."
+
+  # === Блок document_generator (используется через l('document_generator.key_name')) ===
+  document_generator:
+    dialog_title: "Генератор документов"
+    template_file: "Файл шаблона"
+    export_mode_single: "Один файл на запись"
+    export_mode_combined: "Единый документ"
+    file_name: "Имя файла"
+    error_behavior: "При ошибках в шаблоне"
+    error_abort: "Прервать выгрузку"
+    error_skip_field: "Пропустить поле"
+    error_skip_record: "Пропустить запись"
+    records_count: "Будет обработано записей: %{count}"
+    files_count: "Будет создано файлов: %{count}"
+    single_file: "Будет создан 1 файл"
+    button_export: "Выгрузить"
+    button_cancel: "Отмена"
+    error_invalid_filename: "Имя файла содержит недопустимые символы"
+    error_invalid_template: "Ошибка в шаблоне: %{message}"
+    error_no_records: "Нет записей для выгрузки"
+    error_invalid_format: "Неподдерживаемый формат файла шаблона"

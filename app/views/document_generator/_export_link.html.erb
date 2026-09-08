@@ -1,0 +1,18 @@
+<%# Ссылка рендерится в хуке view_issues_index_bottom, %>
+<%# затем JavaScript перемещает её в блок p.other-formats %>
+<% if @project && @project.module_enabled?(:document_generator) %>
+  <% if User.current.allowed_to?(:use_document_generator, @project) %>
+    <%# Подключаем CSS и JS только на странице, где есть ссылка %>
+    <% content_for :header_tags do %>
+      <%= stylesheet_link_tag('document_generator', plugin: 'redmine_document_generator') %>
+      <%= javascript_include_tag('document_generator', plugin: 'redmine_document_generator') %>
+    <% end %>
+
+    <%# Скрытый контейнер — JS переместит ссылку в блок other-formats %>
+    <span id="document-generator-export-link" style="display:none;">
+      <%= link_to sprite_icon('document', l(:label_document_generator)),
+                  document_generator_dialog_path(@project),
+                  class: 'icon icon-document-generator' %>
+    </span>
+  <% end %>
+<% end %>
