@@ -1,18 +1,17 @@
 ru:
-  # === Ключи верхнего уровня (используются через l(:key_name)) ===
   project_module_document_generator: "Генератор документов"
   permission_use_document_generator: "Использовать генератор документов"
   label_document_generator: "Генератор документов"
   error_gems_not_loaded: "Не установлены необходимые библиотеки для генерации документов. Обратитесь к администратору."
-  label_dialog_placeholder: "Диалог будет реализован на следующем этапе."
 
-  # === Блок document_generator (используется через l('document_generator.key_name')) ===
   document_generator:
     dialog_title: "Генератор документов"
     template_file: "Файл шаблона"
+    export_mode: "Режим выгрузки"
     export_mode_single: "Один файл на запись"
     export_mode_combined: "Единый документ"
     file_name: "Имя файла"
+    default_file_name: "Отчёт"
     error_behavior: "При ошибках в шаблоне"
     error_abort: "Прервать выгрузку"
     error_skip_field: "Пропустить поле"

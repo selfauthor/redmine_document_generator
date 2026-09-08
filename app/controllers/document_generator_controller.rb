@@ -7,15 +7,41 @@ class DocumentGeneratorController < ApplicationController
 
   # GET /projects/:project_id/document_generator/dialog
   def dialog
+    # Восстанавливаем запрос из параметров (включая условия текущей фильтрации)
+    @query = IssueQuery.new(name: '_temp', project: @project)
+    @query.build_from_params(params)
+    
+    # Подсчитываем количество записей с учётом прав текущего пользователя
+    @record_count = @query.issue_count
+    
     respond_to do |format|
-      format.html { render plain: 'Document Generator dialog will be available in Stage 2.' }
-      format.js   { render plain: '// JS response will be implemented in Stage 2.' }
+      format.js
     end
   end
 
   # POST /projects/:project_id/document_generator/export
   def export
-    render plain: 'Export functionality will be implemented in later stages.'
+    # Приём параметров (Этап 2)
+    @template_file = params[:template_file]
+    @export_mode = params[:export_mode]
+    @file_name = params[:file_name]
+    @error_behavior = params[:error_behavior]
+    
+    # Валидация имени файла на стороне сервера
+    if @file_name =~ /[\/\\:*?"<>|]/
+      flash[:error] = l('document_generator.error_invalid_filename')
+      redirect_back(fallback_location: project_issues_path(@project)) and return
+    end
+
+    # Временно возвращаем информацию о принятых параметрах для отладки
+    # На Этапе 3 здесь будет реализована реальная генерация документов
+    render plain: "Параметры успешно получены:\n" \
+                 "Режим выгрузки: #{@export_mode}\n" \
+                 "Имя файла: #{@file_name}\n" \
+                 "Поведение при ошибках: #{@error_behavior}\n" \
+                 "Файл шаблона: #{@template_file&.original_filename}\n" \
+                 "Количество записей: #{@query&.issue_count || 'N/A'}",
+           content_type: 'text/plain'
   end
 
   private
@@ -33,7 +59,6 @@ class DocumentGeneratorController < ApplicationController
     deny_access
   end
 
-  # Проверка, что все необходимые gem-ы установлены
   def check_gems_loaded
     return if DOCUMENT_GENERATOR_GEMS_LOADED
 

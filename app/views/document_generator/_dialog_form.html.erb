@@ -1,0 +1,54 @@
+<h3 class="title"><%= l('document_generator.dialog_title') %></h3>
+
+<%= form_tag document_generator_export_path(@project, request.query_parameters), method: :post, id: 'document-generator-form', multipart: true do %>
+  
+  <fieldset class="box">
+    <legend><%= l('document_generator.template_file') %></legend>
+    <p>
+      <%= file_field_tag 'template_file', accept: '.docx,.xlsx,.doc,.xls', required: true %>
+    </p>
+  </fieldset>
+
+  <fieldset class="box">
+    <legend><%= l('document_generator.export_mode') %></legend>
+    <p>
+      <label><%= radio_button_tag 'export_mode', 'single', true %> <%= l('document_generator.export_mode_single') %></label><br>
+      <label><%= radio_button_tag 'export_mode', 'combined' %> <%= l('document_generator.export_mode_combined') %></label>
+    </p>
+  </fieldset>
+
+  <fieldset class="box">
+    <legend><%= l('document_generator.file_name') %></legend>
+    <p>
+      <%= text_field_tag 'file_name', l('document_generator.default_file_name', default: 'Export'), required: true, id: 'dg_file_name' %>
+      <span id="dg-filename-error" class="error" style="display:none;"><%= l('document_generator.error_invalid_filename') %></span>
+    </p>
+  </fieldset>
+
+  <fieldset class="box">
+    <legend><%= l('document_generator.error_behavior') %></legend>
+    <p>
+      <%= select_tag 'error_behavior', options_for_select([
+        [l('document_generator.error_abort'), 'abort'],
+        [l('document_generator.error_skip_field'), 'skip_field'],
+        [l('document_generator.error_skip_record'), 'skip_record']
+      ]) %>
+    </p>
+  </fieldset>
+
+  <fieldset class="box">
+    <legend>Информация</legend>
+    <p id="dg-records-count" data-count="<%= @record_count %>"><%= l('document_generator.records_count', count: @record_count) %></p>
+    <p id="dg-files-count" 
+       data-text-single="<%= l('document_generator.single_file') %>" 
+       data-text-multiple="<%= l('document_generator.files_count', count: @record_count) %>">
+       <%= @record_count > 1 ? l('document_generator.files_count', count: @record_count) : l('document_generator.single_file') %>
+    </p>
+  </fieldset>
+
+  <p class="buttons">
+    <%= submit_tag l('document_generator.button_export'), id: 'dg-submit-btn', disabled: true, data: { disable_with: l('document_generator.button_export') } %>
+    <%= link_to l('button_cancel'), '#', onclick: "hideModal(this); return false;" %>
+  </p>
+
+<% end %>

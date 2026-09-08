@@ -1,0 +1,11 @@
+// Вставляем содержимое формы в стандартный контейнер модального окна Redmine
+$('#ajax-modal').html('<%= j render(partial: "document_generator/dialog_form", locals: { project: @project, record_count: @record_count }) %>');
+
+// Открываем модальное окно шириной 600px
+showModal('ajax-modal', '600px');
+
+// Устанавливаем заголовок модального окна (стандартный класс jQuery UI в Redmine)
+$('#ajax-modal').parent().find('.ui-dialog-title').text('<%= j l('document_generator.dialog_title') %>');
+
+// Инициализируем валидацию после вставки формы в DOM
+DG.updateInfo();

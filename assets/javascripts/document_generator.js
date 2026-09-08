@@ -1,22 +1,58 @@
-// Перемещение ссылки "Генератор документов" в блок экспорта
-// Срабатывает после полной загрузки DOM
+var DG = DG || {};
+
+DG.validateFilename = function(filename) {
+  // Проверка на недопустимые символы: / \ : * ? " < > |
+  var invalidChars = /[\/\\:*?"<>|]/;
+  return !invalidChars.test(filename) && filename.trim().length > 0;
+};
+
+DG.updateInfo = function() {
+  var recordCountEl = $('#dg-records-count');
+  if (!recordCountEl.length) return; // Если форма еще не в DOM, выходим
+
+  var recordCount = parseInt(recordCountEl.data('count'), 10) || 0;
+  var exportMode = $('input[name="export_mode"]:checked').val();
+  var fileName = $('#dg_file_name').val();
+  var isValid = DG.validateFilename(fileName);
+  
+  var $filesCount = $('#dg-files-count');
+  if (exportMode === 'single') {
+    $filesCount.text($filesCount.data('text-multiple'));
+  } else {
+    $filesCount.text($filesCount.data('text-single'));
+  }
+  
+  // Блокируем/разблокируем кнопку выгрузки
+  $('#dg-submit-btn').prop('disabled', !isValid);
+  
+  // Показываем/скрываем ошибку имени файла
+  if (fileName.length > 0 && !isValid) {
+    $('#dg-filename-error').show();
+  } else {
+    $('#dg-filename-error').hide();
+  }
+};
+
 document.addEventListener('DOMContentLoaded', function() {
-  // Находим скрытый контейнер со ссылкой
+  // Перемещение ссылки в блок экспорта
   var linkContainer = document.getElementById('document-generator-export-link');
   if (linkContainer) {
-    // Находим блок экспорта (Atom | CSV | PDF)
     var otherFormats = document.querySelector('p.other-formats');
     if (otherFormats) {
-      // Создаём <span> для единообразия с другими ссылками
       var span = document.createElement('span');
+      span.className = 'dg-export-link';
       span.appendChild(linkContainer.querySelector('a'));
-      
-      // Добавляем разделитель и ссылку в конец блока
-      //otherFormats.appendChild(document.createTextNode(' | '));
       otherFormats.appendChild(span);
-      
-      // Удаляем оригинальный скрытый контейнер
       linkContainer.remove();
     }
   }
+
+  // Делегирование событий для модального окна (создаётся динамически)
+  $(document).on('input', '#dg_file_name', function() {
+    DG.updateInfo();
+  });
+
+  $(document).on('change', 'input[name="export_mode"]', function() {
+    DG.updateInfo();
+  });
 });

@@ -1,8 +1,16 @@
-/* Стили для ссылки "Генератор документов" */
-.icon-document-generator {
+/* Стили для ссылки "Генератор документов" в блоке экспорта */
+.dg-export-link a {
   text-decoration: none;
 }
 
-.icon-document-generator:hover {
+.dg-export-link a:hover {
   text-decoration: underline;
+}
+
+/* Дополнительный стиль для ошибки имени файла (класс .error уже есть в Redmine, но можно уточнить) */
+#dg-filename-error {
+  color: #d9534f;
+  font-size: 0.9em;
+  display: block;
+  margin-top: 4px;
 }

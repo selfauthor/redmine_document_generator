@@ -10,9 +10,10 @@
 
     <%# Скрытый контейнер — JS переместит ссылку в блок other-formats %>
     <span id="document-generator-export-link" style="display:none;">
-      <%= link_to sprite_icon('document', l(:label_document_generator)),
-                  document_generator_dialog_path(@project),
-                  class: 'icon icon-document-generator' %>
+      <%= link_to sprite_icon('file', l(:label_document_generator)),
+                  document_generator_dialog_path(@project, request.query_parameters),
+                  remote: true,
+                  class: 'icon icon-file' %>
     </span>
   <% end %>
 <% end %>
