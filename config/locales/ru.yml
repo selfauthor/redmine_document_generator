@@ -29,3 +29,5 @@ ru:
     watcher_name: "Имя"
     xlsx_not_implemented: "Выгрузка в Excel будет реализована на следующем этапе."
     error_processing_skipped: "Ошибка при обработке: %{message}. Режим пропуска пока ограничен."
+    error_row_template_missing: "В шаблоне Excel не найден маркер ROW в первой ячейке строки"
+    error_gems_not_loaded: "Необходимые библиотеки для генерации документов не установлены"

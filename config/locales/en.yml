@@ -29,3 +29,5 @@ en:
     watcher_name: "Name"
     xlsx_not_implemented: "Excel export will be implemented in the next stage."
     error_processing_skipped: "Processing error: %{message}. Skip mode is currently limited."
+    error_row_template_missing: "ROW marker not found in the first cell of the Excel template"
+    error_gems_not_loaded: "Required document generation libraries are not installed"

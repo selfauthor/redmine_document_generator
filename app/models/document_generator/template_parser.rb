@@ -23,6 +23,7 @@ module DocumentGenerator
 
     def parse
       text = extract_text
+      config[:template_text] = text
       config = {
         group_by: nil,
         group_by_2: nil,
