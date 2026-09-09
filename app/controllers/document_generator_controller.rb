@@ -7,6 +7,7 @@ class DocumentGeneratorController < ApplicationController
 
   # GET /projects/:project_id/document_generator/dialog
   # Открывает модальное окно с подсчётом записей по текущему фильтру
+  # @return [void] Рендерит JS-шаблон для отображения модального окна
   def dialog
     @query = IssueQuery.new(name: '_document_generator_temp', project: @project)
     @query.build_from_params(params)
@@ -18,15 +19,16 @@ class DocumentGeneratorController < ApplicationController
   end
 
   # POST /projects/:project_id/document_generator/export
-  # Основной метод генерации и скачивания документа
+  # Основной метод генерации и скачивания документа (или архива)
+  # @return [void] Отправляет сгенерированный файл или архив пользователю
   def export
     @template_file = params[:template_file]
     @export_mode = params[:export_mode]
     @file_name = params[:file_name]
     @error_behavior = params[:error_behavior]
 
-    # Валидация имени файла на недопустимые символы
-    if @file_name =~ /[/\\:*?"<>|]/
+    # Валидация имени файла на недопустимые символы (/ \ : * ? " < > |)
+    if @file_name =~ /[\/:*?"<>|]/
       flash[:error] = I18n.t('document_generator.error_invalid_filename')
       redirect_back(fallback_location: project_issues_path(@project)) and return
     end
@@ -49,14 +51,16 @@ class DocumentGeneratorController < ApplicationController
       config = parser.parse
 
       if @export_mode == 'single'
-        # Режим "Один файл на запись": генерируем ZIP-архив
+        # Режим "Один файл на запись": генерируем ZIP-архив для надёжной передачи.
+        # Множественные скачивания через JS часто блокируются политиками браузеров,
+        # поэтому архив является наиболее стабильным и предсказуемым решением.
         archive_path = generate_single_mode_archive(temp_template_path, config)
         send_file archive_path,
                   filename: "#{@file_name}.zip",
                   type: 'application/zip',
                   disposition: 'attachment'
       else
-        # Режим "Единый документ": один файл
+        # Режим "Единый документ": генерация одного файла
         output_path = generate_combined_document(temp_template_path, config)
         ext = File.extname(temp_template_path)
         send_file output_path,
@@ -70,25 +74,31 @@ class DocumentGeneratorController < ApplicationController
       flash[:error] = I18n.t('document_generator.error_invalid_template', message: e.message)
       redirect_back(fallback_location: project_issues_path(@project))
     ensure
-      # Гарантированная очистка временного файла шаблона
+      # Гарантированная очистка временного файла шаблона в любом случае завершения
       FileUtils.rm_f(temp_template_path) if temp_template_path && File.exist?(temp_template_path)
     end
   end
 
   private
 
+  # Находит проект по ID из параметров
+  # @return [void] Устанавливает @project или рендерит 404
   def find_project
     @project = Project.find(params[:project_id])
   rescue ActiveRecord::RecordNotFound
     render_404
   end
 
+  # Проверяет право пользователя на использование генератора документов
+  # @return [void] Вызывает deny_access при отсутствии прав
   def authorize_document_generator
     return if @project.module_enabled?(:document_generator) &&
               User.current.allowed_to?(:use_document_generator, @project)
     deny_access
   end
 
+  # Проверяет загрузку необходимых gem-библиотек
+  # @return [void] Перенаправляет с ошибкой, если библиотеки отсутствуют
   def check_gems_loaded
     return if defined?(DOCUMENT_GENERATOR_GEMS_LOADED) && DOCUMENT_GENERATOR_GEMS_LOADED
     flash[:error] = I18n.t('document_generator.error_gems_not_loaded')
@@ -114,7 +124,7 @@ class DocumentGeneratorController < ApplicationController
     result = renderer.render
 
     # WordRenderer возвращает объект Sablon, ExcelRenderer — путь к файлу.
-    # Унифицируем: если результат не строка (путь), записываем его в файл.
+    # Унифицируем поведение: если результат не строка (путь), записываем его в файл.
     if result.is_a?(String) && File.exist?(result)
       result
     else
@@ -133,25 +143,33 @@ class DocumentGeneratorController < ApplicationController
 
     archive_path = File.join(Dir.mktmpdir, "#{@file_name}.zip")
     ext = File.extname(template_path)
+    
+    # Создаём отдельную временную директорию для промежуточных файлов записей
+    temp_files_dir = Dir.mktmpdir
 
-    Zip::File.open(archive_path, Zip::File::CREATE) do |zipfile|
-      @issues.each do |issue|
-        # Для каждой записи создаём отдельный рендерер с массивом из одной задачи
-        renderer = create_renderer(template_path, [issue], config)
-        result = renderer.render
+    begin
+      Zip::File.open(archive_path, Zip::File::CREATE) do |zipfile|
+        @issues.each do |issue|
+          # Для каждой записи создаём отдельный рендерер с массивом из одной задачи
+          renderer = create_renderer(template_path, [issue], config)
+          result = renderer.render
 
-        # Унифицируем результат (объект Sablon или путь к файлу)
-        if result.is_a?(String) && File.exist?(result)
-          file_path = result
-        else
-          file_path = File.join(Dir.mktmpdir, "temp#{ext}")
-          result.write(file_path)
+          # Унифицируем результат (объект Sablon или путь к файлу)
+          if result.is_a?(String) && File.exist?(result)
+            file_path = result
+          else
+            file_path = File.join(temp_files_dir, "temp_#{issue.id}#{ext}")
+            result.write(file_path)
+          end
+
+          # Формирование имени файла внутри архива: {введённое_имя}_{id}.{расширение}
+          filename_in_zip = "#{@file_name}_#{issue.id}#{ext}"
+          zipfile.add(filename_in_zip, file_path)
         end
-
-        filename_in_zip = "#{@file_name}_#{issue.id}#{ext}"
-        zipfile.add(filename_in_zip, file_path)
-        FileUtils.rm_f(file_path)
       end
+    ensure
+      # Гарантированная очистка временных файлов записей после создания архива
+      FileUtils.rm_rf(temp_files_dir) if temp_files_dir && File.exist?(temp_files_dir)
     end
 
     archive_path
