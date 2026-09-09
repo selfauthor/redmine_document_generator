@@ -25,3 +25,7 @@ en:
     error_invalid_template: "Template error: %{message}"
     error_no_records: "No records to export"
     error_invalid_format: "Unsupported template file format"
+    relation_type: "Relation Type"
+    watcher_name: "Name"
+    xlsx_not_implemented: "Excel export will be implemented in the next stage."
+    error_processing_skipped: "Processing error: %{message}. Skip mode is currently limited."

@@ -25,3 +25,7 @@ ru:
     error_invalid_template: "Ошибка в шаблоне: %{message}"
     error_no_records: "Нет записей для выгрузки"
     error_invalid_format: "Неподдерживаемый формат файла шаблона"
+    relation_type: "Тип связи"
+    watcher_name: "Имя"
+    xlsx_not_implemented: "Выгрузка в Excel будет реализована на следующем этапе."
+    error_processing_skipped: "Ошибка при обработке: %{message}. Режим пропуска пока ограничен."
