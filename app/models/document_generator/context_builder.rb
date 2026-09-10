@@ -2,11 +2,11 @@
 
 module DocumentGenerator
   # Класс отвечает за подготовку структурированных данных (контекста) 
-  # из массива задач для последующей передачи в рендереры (Word/Excel).
+  # из массива записей для последующей передачи в рендереры (Word/Excel).
   class ContextBuilder
-    # @param issues [ActiveRecord::Relation] Выборка задач
+    # @param issues [ActiveRecord::Relation] Выборка записей
     # @param parser_config [Hash] Конфигурация из TemplateParser
-    # @param error_behavior [String] Стратегия обработки ошибок
+    # @param error_behavior [String] Стратегия обработки ошибок ('abort', 'skip_field', 'skip_record')
     def initialize(issues, parser_config, error_behavior)
       @issues = issues
       @parser_config = parser_config
@@ -22,6 +22,13 @@ module DocumentGenerator
       else
         build_flat_context
       end
+    rescue DocumentGenerator::TemplateError => e
+      # Пробрасываем ошибки шаблона дальше, чтобы контроллер мог их обработать
+      raise e
+    rescue StandardError => e
+      # Логируем на английском, выбрасываем ошибку с локализованным сообщением
+      Rails.logger.error "[DocumentGenerator] Context build failed: #{e.message}"
+      handle_error(I18n.t('document_generator.error_context_build_failed', message: e.message))
     end
 
     # Форматирует значение для безопасного вывода в шаблон
@@ -41,7 +48,15 @@ module DocumentGenerator
     private
 
     def build_flat_context
-      records = @issues.map { |issue| build_issue_hash(issue) }
+      records = []
+      @issues.each do |issue|
+        records << build_issue_hash(issue)
+      rescue DocumentGenerator::SkipRecordError => e
+        # Запись пропускается, в журнал добавляется отладочная запись на английском
+        Rails.logger.debug "[DocumentGenerator] Skipping record ##{issue.id}: #{e.message}"
+        next
+      end
+      
       {
         'records' => records,
         'total_count' => records.size,
@@ -74,9 +89,16 @@ module DocumentGenerator
 
       groups_data.each do |group_key, group_issues|
         group_key_array = group_key.is_a?(Array) ? group_key : [group_key, nil]
-        records = group_issues.map { |issue| build_issue_hash(issue) }
-        records = records.map.with_index(1) { |r, i| r.merge('row_number_in_group' => i) }
+        records = []
         
+        group_issues.each do |issue|
+          records << build_issue_hash(issue)
+        rescue DocumentGenerator::SkipRecordError => e
+          Rails.logger.debug "[DocumentGenerator] Skipping record in group ##{issue.id}: #{e.message}"
+          next
+        end
+        
+        records = records.map.with_index(1) { |r, i| r.merge('row_number_in_group' => i) }
         group_aggregates = calculate_aggregates(group_issues, 'group_')
         
         groups_array << {
@@ -166,6 +188,16 @@ module DocumentGenerator
 
       evaluate_template_functions(hash, issue)
       hash
+    rescue StandardError => e
+      # Если произошла ошибка при обработке конкретной записи, делегируем её обработчику
+      error_msg = I18n.t('document_generator.error_record_processing_failed', id: issue.id, message: e.message)
+      handle_error(error_msg)
+      
+      # При skip_record мы должны прервать выполнение этого метода, чтобы запись не попала в результат
+      raise DocumentGenerator::SkipRecordError, error_msg if @error_behavior == 'skip_record'
+      
+      # При skip_field возвращаем пустой хэш (запись будет в выгрузке, но без данных)
+      {}
     end
 
     def evaluate_template_functions(hash, issue)
@@ -173,36 +205,45 @@ module DocumentGenerator
         args = args_str.split(',').map { |a| a.strip.gsub(/^['"]|['"]$/, '') }
         func_name = func.downcase
         
-        case func_name
-        when 'date'
-          val = get_field_value(issue, args[0])
-          hash["#{args[0]}_formatted"] = (val.is_a?(Date) || val.is_a?(Time)) ? val.strftime(args[1]) : val
-        when 'now'
-          hash["now_formatted"] = Time.now.strftime(args[0])
-        when 'upper'
-          val = get_field_value(issue, args[0])
-          hash["#{args[0]}_upper"] = val.to_s.upcase
-        when 'lower'
-          val = get_field_value(issue, args[0])
-          hash["#{args[0]}_lower"] = val.to_s.downcase
-        when 'default'
-          val = get_field_value(issue, args[0])
-          hash["#{args[0]}_default"] = val.to_s.presence || args[1]
-        when 'strip_html'
-          val = get_field_value(issue, args[0])
-          hash["#{args[0]}_stripped"] = val.to_s.gsub(/<[^>]*>/, '')
+        begin
+          case func_name
+          when 'date'
+            val = get_field_value(issue, args[0])
+            hash["#{args[0]}_formatted"] = (val.is_a?(Date) || val.is_a?(Time)) ? val.strftime(args[1]) : val
+          when 'now'
+            hash["now_formatted"] = Time.now.strftime(args[0])
+          when 'upper'
+            val = get_field_value(issue, args[0])
+            hash["#{args[0]}_upper"] = val.to_s.upcase
+          when 'lower'
+            val = get_field_value(issue, args[0])
+            hash["#{args[0]}_lower"] = val.to_s.downcase
+          when 'default'
+            val = get_field_value(issue, args[0])
+            hash["#{args[0]}_default"] = val.to_s.presence || args[1]
+          when 'strip_html'
+            val = get_field_value(issue, args[0])
+            hash["#{args[0]}_stripped"] = val.to_s.gsub(/<[^>]*>/, '')
+          end
+        rescue StandardError => e
+          error_msg = I18n.t('document_generator.error_function_failed', func: func_name, message: e.message)
+          handle_error(error_msg)
         end
       end
     end
 
     def get_field_value(issue, field_name)
       resolved = FieldResolver.resolve(field_name)
+      if resolved[:type] == :unknown
+        error_msg = I18n.t('document_generator.error_unknown_field_in_function', field: field_name)
+        handle_error(error_msg)
+        return nil
+      end
       FieldResolver.get_value(issue, resolved)
     end
 
     def calculate_aggregates(issues, prefix)
       aggregates = {}
-      # Извлекаем уникальные запросы агрегатов из текста шаблона
       aggregate_requests = extract_aggregate_requests
       
       aggregate_requests.each do |req|
@@ -210,7 +251,6 @@ module DocumentGenerator
         func = req[:func]
         field = req[:field]
         
-        # Если запрошен total_, но мы считаем для группы, пропускаем (или считаем от всех)
         target_issues = is_total ? @issues : issues
         key = "#{prefix}agg_#{func}_#{field}"
         aggregates[key] = AggregateCalculator.new(target_issues).calculate(func, field)
@@ -225,6 +265,22 @@ module DocumentGenerator
         requests << { is_total: is_total.present?, func: func.downcase, field: field.strip }
       end
       requests.uniq
+    end
+
+    # Универсальный обработчик ошибок, действующий согласно выбранной стратегии
+    # @param message [String] Текст ошибки (уже локализованный)
+    def handle_error(message)
+      case @error_behavior
+      when 'abort'
+        raise DocumentGenerator::TemplateError, message
+      when 'skip_field'
+        Rails.logger.warn "[DocumentGenerator] Skipping field: #{message}"
+        nil
+      when 'skip_record'
+        Rails.logger.warn "[DocumentGenerator] Skipping record: #{message}"
+        # Исключение будет перехвачено в циклах build_flat_context / build_grouped_context
+        raise DocumentGenerator::SkipRecordError, message
+      end
     end
   end
 end

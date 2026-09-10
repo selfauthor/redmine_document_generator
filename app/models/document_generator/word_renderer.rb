@@ -9,7 +9,7 @@ module DocumentGenerator
   # Класс отвечает за генерацию документа Word (.docx) на основе шаблона и данных.
   class WordRenderer
     # @param template_path [String] Путь к временному файлу шаблона
-    # @param issues [ActiveRecord::Relation] Выборка задач для выгрузки
+    # @param issues [ActiveRecord::Relation] Выборка записей для выгрузки
     # @param parser_config [Hash] Конфигурация, полученная от TemplateParser
     # @param error_behavior [String] Стратегия обработки ошибок
     def initialize(template_path, issues, parser_config, error_behavior)
@@ -31,13 +31,17 @@ module DocumentGenerator
       # 3. Создаем временную копию шаблона с заменой маркеров <%...%> на «...»
       processed_template_path = preprocess_template
 
-      # 4. Выполняем рендеринг через Sablon
-      template = Sablon.template(processed_template_path)
-      doc = template.render(context)
-      doc
-
-    ensure
-      FileUtils.rm_f(processed_template_path) if processed_template_path && File.exist?(processed_template_path)
+      # 4. Выполняем рендеринг через Sablon с перехватом ошибок
+      begin
+        template = Sablon.template(processed_template_path)
+        doc = template.render(context)
+        doc
+      rescue Sablon::Error, StandardError => e
+        error_msg = I18n.t('document_generator.error_word_render_failed', message: e.message)
+        handle_error(error_msg)
+      ensure
+        FileUtils.rm_f(processed_template_path) if processed_template_path && File.exist?(processed_template_path)
+      end
     end
 
     private
@@ -128,6 +132,21 @@ module DocumentGenerator
       end
 
       temp_path
+    end
+
+    # Обработчик ошибок для Word-рендерера
+    # @param message [String] Текст ошибки (уже локализованный)
+    def handle_error(message)
+      case @error_behavior
+      when 'abort'
+        raise DocumentGenerator::RenderError, message
+      when 'skip_field', 'skip_record'
+        # Рендеринг Word через Sablon является атомарным процессом. 
+        # Пропуск отдельной записи или поля на этапе рендеринга технически сложен и может привести к повреждению структуры документа.
+        # Поэтому при ошибках рендеринга мы логируем их на английском и прерываем выполнение.
+        Rails.logger.error "[DocumentGenerator] Critical rendering error (behavior: #{@error_behavior}): #{message}"
+        raise DocumentGenerator::RenderError, message
+      end
     end
   end
 end

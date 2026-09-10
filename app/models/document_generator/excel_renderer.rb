@@ -7,7 +7,7 @@ module DocumentGenerator
   # Класс отвечает за генерацию документа Excel (.xlsx) на основе шаблона и данных.
   class ExcelRenderer
     # @param template_path [String] Путь к временному файлу шаблона
-    # @param issues [ActiveRecord::Relation] Выборка задач для выгрузки
+    # @param issues [ActiveRecord::Relation] Выборка записей для выгрузки
     # @param parser_config [Hash] Конфигурация, полученная от TemplateParser
     # @param error_behavior [String] Стратегия обработки ошибок
     def initialize(template_path, issues, parser_config, error_behavior)
@@ -29,10 +29,18 @@ module DocumentGenerator
       identify_template_rows
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
 
-      if @parser_config[:group_by]
-        render_grouped_mode(context)
-      else
-        render_flat_mode(context)
+      begin
+        if @parser_config[:group_by]
+          render_grouped_mode(context)
+        else
+          render_flat_mode(context)
+        end
+      rescue DocumentGenerator::SkipRecordError
+        # Ошибка уже залогирована в ContextBuilder или обработана внутри цикла
+        Rails.logger.warn "[DocumentGenerator] Some records were skipped during Excel rendering"
+      rescue StandardError => e
+        error_msg = I18n.t('document_generator.error_excel_render_failed', message: e.message)
+        handle_error(error_msg)
       end
 
       output_path = generate_output_path
@@ -61,15 +69,20 @@ module DocumentGenerator
 
     def render_flat_mode(context)
       row_idx = @template_rows[:row]
-      handle_error('Row template missing') unless row_idx
+      handle_error(I18n.t('document_generator.error_row_template_missing')) unless row_idx
 
       new_rows = []
       (0...row_idx).each { |i| new_rows << @worksheet.sheet_data.rows[i] }
 
       context['records'].each_with_index do |record, index|
-        new_row = clone_row(@worksheet.sheet_data.rows[row_idx], index)
-        replace_fields_in_row(new_row, record, index + 1)
-        new_rows << new_row
+        begin
+          new_row = clone_row(@worksheet.sheet_data.rows[row_idx], index)
+          replace_fields_in_row(new_row, record, index + 1)
+          new_rows << new_row
+        rescue DocumentGenerator::SkipRecordError => e
+          Rails.logger.debug "[DocumentGenerator] Skipping row in Excel: #{e.message}"
+          next
+        end
       end
 
       last_idx = @template_rows.values.compact.max || row_idx
@@ -97,9 +110,14 @@ module DocumentGenerator
         group['records'].each do |record|
           row_template = @worksheet.sheet_data.rows[@template_rows[:row]]
           if row_template
-            new_row = clone_row(row_template, new_rows.size)
-            replace_fields_in_row(new_row, record, global_row_num)
-            new_rows << new_row
+            begin
+              new_row = clone_row(row_template, new_rows.size)
+              replace_fields_in_row(new_row, record, global_row_num)
+              new_rows << new_row
+            rescue DocumentGenerator::SkipRecordError => e
+              Rails.logger.debug "[DocumentGenerator] Skipping row in Excel group: #{e.message}"
+              next
+            end
           end
           global_row_num += 1
         end
@@ -161,7 +179,8 @@ module DocumentGenerator
           if record.key?(field_name)
             ContextBuilder.format_value(record[field_name])
           else
-            handle_error("Unknown field: #{field_name}")
+            error_msg = I18n.t('document_generator.error_unknown_field_in_template', field: field_name)
+            handle_error(error_msg)
             match
           end
         end
@@ -194,8 +213,10 @@ module DocumentGenerator
     def handle_error(message)
       case @error_behavior
       when 'abort'
-        raise I18n.t('document_generator.error_invalid_template', message: message)
+        raise DocumentGenerator::RenderError, message
       when 'skip_field', 'skip_record'
+        # При пропуске записи мы генерируем исключение, чтобы прервать текущую итерацию цикла
+        raise DocumentGenerator::SkipRecordError, message if @error_behavior == 'skip_record'
         ''
       else
         ''
