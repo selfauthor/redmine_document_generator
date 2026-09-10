@@ -23,10 +23,8 @@ module DocumentGenerator
         build_flat_context
       end
     rescue DocumentGenerator::TemplateError => e
-      # Пробрасываем ошибки шаблона дальше, чтобы контроллер мог их обработать
       raise e
     rescue StandardError => e
-      # Логируем на английском, выбрасываем ошибку с локализованным сообщением
       Rails.logger.error "[DocumentGenerator] Context build failed: #{e.message}"
       handle_error(I18n.t('document_generator.error_context_build_failed', message: e.message))
     end
@@ -52,7 +50,6 @@ module DocumentGenerator
       @issues.each do |issue|
         records << build_issue_hash(issue)
       rescue DocumentGenerator::SkipRecordError => e
-        # Запись пропускается, в журнал добавляется отладочная запись на английском
         Rails.logger.debug "[DocumentGenerator] Skipping record ##{issue.id}: #{e.message}"
         next
       end
@@ -189,14 +186,9 @@ module DocumentGenerator
       evaluate_template_functions(hash, issue)
       hash
     rescue StandardError => e
-      # Если произошла ошибка при обработке конкретной записи, делегируем её обработчику
       error_msg = I18n.t('document_generator.error_record_processing_failed', id: issue.id, message: e.message)
       handle_error(error_msg)
-      
-      # При skip_record мы должны прервать выполнение этого метода, чтобы запись не попала в результат
       raise DocumentGenerator::SkipRecordError, error_msg if @error_behavior == 'skip_record'
-      
-      # При skip_field возвращаем пустой хэш (запись будет в выгрузке, но без данных)
       {}
     end
 
@@ -278,7 +270,6 @@ module DocumentGenerator
         nil
       when 'skip_record'
         Rails.logger.warn "[DocumentGenerator] Skipping record: #{message}"
-        # Исключение будет перехвачено в циклах build_flat_context / build_grouped_context
         raise DocumentGenerator::SkipRecordError, message
       end
     end

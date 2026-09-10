@@ -36,7 +36,6 @@ module DocumentGenerator
           render_flat_mode(context)
         end
       rescue DocumentGenerator::SkipRecordError
-        # Ошибка уже залогирована в ContextBuilder или обработана внутри цикла
         Rails.logger.warn "[DocumentGenerator] Some records were skipped during Excel rendering"
       rescue StandardError => e
         error_msg = I18n.t('document_generator.error_excel_render_failed', message: e.message)
@@ -215,7 +214,6 @@ module DocumentGenerator
       when 'abort'
         raise DocumentGenerator::RenderError, message
       when 'skip_field', 'skip_record'
-        # При пропуске записи мы генерируем исключение, чтобы прервать текущую итерацию цикла
         raise DocumentGenerator::SkipRecordError, message if @error_behavior == 'skip_record'
         ''
       else
