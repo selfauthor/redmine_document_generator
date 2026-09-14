@@ -3,228 +3,134 @@
 require 'rubyXL'
 require 'fileutils'
 
+# v2609141326
 module DocumentGenerator
-  # Класс отвечает за генерацию документа Excel (.xlsx) на основе шаблона и данных.
+  # ExcelRenderer is responsible for generating Excel documents (.xlsx).
+  # It uses the rubyXL library to preserve formatting,
+  # but relies on TemplateProcessor for marker substitution in cell values.
   class ExcelRenderer
-    # @param template_path [String] Путь к временному файлу шаблона
-    # @param issues [ActiveRecord::Relation] Выборка записей для выгрузки
-    # @param parser_config [Hash] Конфигурация, полученная от TemplateParser
-    # @param error_behavior [String] Стратегия обработки ошибок
+    # @param template_path [String] Path to the temporary template file
+    # @param issues [ActiveRecord::Relation] The collection of records to export
+    # @param parser_config [Hash] Configuration from TemplateParser
+    # @param error_behavior [String] Error handling strategy ('abort', 'skip_field', 'skip_record')
     def initialize(template_path, issues, parser_config, error_behavior)
       @template_path = template_path
       @issues = issues
       @parser_config = parser_config
       @error_behavior = error_behavior
-      @workbook = nil
-      @worksheet = nil
-      @template_rows = {}
     end
 
-    # Основной метод генерации документа
-    # @return [String] Путь к сгенерированному временному файлу .xlsx
+    # Main document generation method.
+    #
+    # @return [String] Path to the generated .xlsx file
     def render
-      @workbook = RubyXL::Parser.parse(@template_path)
-      @worksheet = @workbook[0]
-
-      identify_template_rows
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
+      output_path = "#{@template_path}.output.xlsx"
 
       begin
-        if @parser_config[:group_by]
-          render_grouped_mode(context)
-        else
-          render_flat_mode(context)
+        Rails.logger.info "[DocumentGenerator] Parsing Excel template: #{@template_path}"
+        workbook = RubyXL::Parser.parse(@template_path)
+
+        workbook.worksheets.each do |worksheet|
+          process_excel_worksheet(worksheet, context)
         end
-      rescue DocumentGenerator::SkipRecordError
-        Rails.logger.warn "[DocumentGenerator] Some records were skipped during Excel rendering"
+
+        workbook.write(output_path)
+        Rails.logger.info "[DocumentGenerator] Excel generation completed: #{output_path}"
+        output_path
+        
       rescue StandardError => e
+        Rails.logger.error "[DocumentGenerator] Excel render failed: #{e.message}\n#{e.backtrace&.join("\n")}"
         error_msg = I18n.t('document_generator.error_excel_render_failed', message: e.message)
         handle_error(error_msg)
       end
-
-      output_path = generate_output_path
-      @workbook.write(output_path)
-      output_path
     end
 
     private
 
-    def identify_template_rows
-      roles = %w[GROUP_HEADER GROUP_HEADER_2 ROW GROUP_FOOTER_2 GROUP_FOOTER TOTAL]
-      
-      @worksheet.sheet_data.rows.each_with_index do |row, index|
+    # Processes a specific Excel worksheet.
+    # Finds rows with the ROW marker, clones them for each record,
+    # and replaces markers in the cell values.
+    #
+    # @param worksheet [RubyXL::Worksheet] The Excel worksheet to process
+    # @param context [Hash] Data for substitution
+    def process_excel_worksheet(worksheet, context)
+      return unless worksheet.sheet_data
+
+      rows_to_process = []
+      worksheet.sheet_data.rows.each_with_index do |row, row_idx|
         next unless row
         
-        first_cell = row.cells.first
-        next unless first_cell && first_cell.value.is_a?(String)
-        
-        cell_value = first_cell.value.strip.upcase
-        if roles.include?(cell_value)
-          @template_rows[cell_value.downcase.to_sym] = index
-          first_cell.change_contents('')
-        end
-      end
-    end
-
-    def render_flat_mode(context)
-      row_idx = @template_rows[:row]
-      handle_error(I18n.t('document_generator.error_row_template_missing')) unless row_idx
-
-      new_rows = []
-      (0...row_idx).each { |i| new_rows << @worksheet.sheet_data.rows[i] }
-
-      context['records'].each_with_index do |record, index|
-        begin
-          new_row = clone_row(@worksheet.sheet_data.rows[row_idx], index)
-          replace_fields_in_row(new_row, record, index + 1)
-          new_rows << new_row
-        rescue DocumentGenerator::SkipRecordError => e
-          Rails.logger.debug "[DocumentGenerator] Skipping row in Excel: #{e.message}"
-          next
+        row_text = row.cells.map { |c| c&.value.to_s }.join
+        if row_text.include?('ROW') || row_text.include?('<%BEGIN_ROW%>')
+          rows_to_process << row_idx
         end
       end
 
-      last_idx = @template_rows.values.compact.max || row_idx
-      ((last_idx + 1)...@worksheet.sheet_data.rows.size).each do |i|
-        new_rows << @worksheet.sheet_data.rows[i]
-      end
+      # Process rows in reverse order to safely insert clones without breaking indices
+      rows_to_process.reverse_each do |row_idx|
+        template_row = worksheet.sheet_data.rows[row_idx]
+        next unless template_row
 
-      @worksheet.sheet_data.rows = new_rows
-    end
+        records = context['records'] || [context]
 
-    def render_grouped_mode(context)
-      new_rows = []
-      first_idx = @template_rows.values.compact.min || 0
-      (0...first_idx).each { |i| new_rows << @worksheet.sheet_data.rows[i] }
+        clean_row_markers(template_row)
 
-      global_row_num = 1
-      context['groups'].each do |group|
-        if @template_rows[:group_header]
-          header_row = clone_row(@worksheet.sheet_data.rows[@template_rows[:group_header]], new_rows.size)
-          replace_fields_in_row(header_row, group, global_row_num)
-          replace_aggregates_in_row(header_row, group, 'group_')
-          new_rows << header_row
-        end
-
-        group['records'].each do |record|
-          row_template = @worksheet.sheet_data.rows[@template_rows[:row]]
-          if row_template
-            begin
-              new_row = clone_row(row_template, new_rows.size)
-              replace_fields_in_row(new_row, record, global_row_num)
-              new_rows << new_row
-            rescue DocumentGenerator::SkipRecordError => e
-              Rails.logger.debug "[DocumentGenerator] Skipping row in Excel group: #{e.message}"
-              next
+        records.each do |record|
+          new_row_cells = template_row.cells.map do |cell|
+            next nil unless cell
+            
+            new_cell = cell.dup
+            if new_cell.value.is_a?(String)
+              new_cell.value = TemplateProcessor.substitute_markers(new_cell.value, record)
             end
+            new_cell
           end
-          global_row_num += 1
+
+          worksheet.sheet_data.add_row(new_row_cells, row_idx + 1)
         end
 
-        if @template_rows[:group_footer]
-          footer_row = clone_row(@worksheet.sheet_data.rows[@template_rows[:group_footer]], new_rows.size)
-          replace_aggregates_in_row(footer_row, group, 'group_')
-          new_rows << footer_row
+        worksheet.delete_row(row_idx)
+      end
+
+      # If no loops existed, just replace markers globally (for headers/footers)
+      if rows_to_process.empty?
+        render_context = context['records'].first || context
+        worksheet.sheet_data.rows.each do |row|
+          next unless row
+          row.cells.each do |cell|
+            next unless cell && cell.value.is_a?(String)
+            cell.value = TemplateProcessor.substitute_markers(cell.value, render_context)
+          end
         end
       end
-
-      if @template_rows[:total]
-        total_row = clone_row(@worksheet.sheet_data.rows[@template_rows[:total]], new_rows.size)
-        replace_aggregates_in_row(total_row, context['totals'].first, 'total_')
-        new_rows << total_row
-      end
-
-      last_idx = @template_rows.values.compact.max || 0
-      ((last_idx + 1)...@worksheet.sheet_data.rows.size).each do |i|
-        new_rows << @worksheet.sheet_data.rows[i]
-      end
-
-      @worksheet.sheet_data.rows = new_rows
-    end
-
-    def clone_row(template_row, target_index)
-      return nil unless template_row
       
-      new_row = RubyXL::Row.new(worksheet: @worksheet, row_index: target_index)
-      template_row.cells.each do |cell|
-        next unless cell
-        
-        new_cell = RubyXL::Cell.new(
-          worksheet: @worksheet,
-          row_index: target_index,
-          column_index: cell.column_index,
-          value: cell.value,
-          style_index: cell.style_index,
-          type: cell.type
-        )
-        new_row.add_cell(new_cell)
-      end
-      new_row
+      worksheet.sheet_data.rows.compact!
     end
 
-    def replace_fields_in_row(row, record, global_row_num)
+    # Removes control markers from cell values in a row.
+    #
+    # @param row [RubyXL::Row] The Excel row
+    def clean_row_markers(row)
       row.cells.each do |cell|
-        next unless cell && cell.value.is_a?(String)
+        next unless cell && cell.value.is_a?(aString)
         
-        new_value = cell.value.dup
-        new_value = new_value.gsub(/<%\s*row_number\s*%>/i, global_row_num.to_s)
-        new_value = new_value.gsub(/<%\s*row_number_in_group\s*%>/i, record['row_number_in_group'].to_s) if record['row_number_in_group']
-        new_value = new_value.gsub(/<%\s*GroupValue\s*%>/i, record['GroupValue'].to_s) if record['GroupValue']
-        new_value = new_value.gsub(/<%\s*GroupValue2\s*%>/i, record['GroupValue2'].to_s) if record['GroupValue2']
-        new_value = new_value.gsub(/<%\s*count\s*%>/i, record['count'].to_s) if record['count']
-
-        new_value.gsub!(/<%\s*([^%]+?)\s*%>/) do |match|
-          field_name = $1.strip
-          if record.key?(field_name)
-            ContextBuilder.format_value(record[field_name])
-          else
-            error_msg = I18n.t('document_generator.error_unknown_field_in_template', field: field_name)
-            handle_error(error_msg)
-            match
-          end
-        end
-        
-        cell.change_contents(new_value) if new_value != cell.value
+        cell.value = cell.value.gsub(/<%\s*(BEGIN_ROW|END_ROW|GROUP_BY|GROUP_BY_2)\s*%>/i, '').strip
+        cell.value = nil if cell.value.empty?
       end
     end
 
-    def replace_aggregates_in_row(row, record, prefix)
-      row.cells.each do |cell|
-        next unless cell && cell.value.is_a?(String)
-        
-        new_value = cell.value.dup
-        
-        new_value.gsub!(/<%\s*(total_)?(count|sum|avg|min|max|concat)\s*\(\s*([^%]+?)\s*\)\s*%>/i) do |match|
-          is_total = $1.present?
-          func = $2.downcase
-          field = $3.strip
-          
-          key = "#{is_total ? 'total_' : 'group_'}agg_#{func}_#{field}"
-          ContextBuilder.format_value(record[key])
-        end
-        
-        new_value.gsub!(/<%\s*total_count\s*%>/i, record['total_count'].to_s) if record['total_count']
-
-        cell.change_contents(new_value) if new_value != cell.value
-      end
-    end
-
+    # Universal error handler.
+    #
+    # @param message [String] The error message (already localized)
     def handle_error(message)
       case @error_behavior
       when 'abort'
         raise DocumentGenerator::RenderError, message
       when 'skip_field', 'skip_record'
-        raise DocumentGenerator::SkipRecordError, message if @error_behavior == 'skip_record'
-        ''
-      else
-        ''
+        Rails.logger.error "[DocumentGenerator] Render error (behavior: #{@error_behavior}): #{message}"
+        raise DocumentGenerator::RenderError, message
       end
-    end
-
-    def generate_output_path
-      ext = File.extname(@template_path)
-      dir = Dir.mktmpdir
-      File.join(dir, "output#{ext}")
     end
   end
 end
