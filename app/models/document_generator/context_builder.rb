@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# v2609111409
+# v2609111508
 module DocumentGenerator
   # Класс отвечает за подготовку структурированных данных (контекста) 
   # из массива записей для последующей передачи в рендереры (Word/Excel).
@@ -51,7 +51,6 @@ module DocumentGenerator
       @issues.each do |issue|
         records << build_issue_hash(issue)
       rescue DocumentGenerator::SkipRecordError => e
-        Rails.logger.debug "[DocumentGenerator] Skipping record ##{issue.id}: #{e.message}"
         next
       end
       
@@ -92,7 +91,6 @@ module DocumentGenerator
         group_issues.each do |issue|
           records << build_issue_hash(issue)
         rescue DocumentGenerator::SkipRecordError => e
-          Rails.logger.debug "[DocumentGenerator] Skipping record in group ##{issue.id}: #{e.message}"
           next
         end
         

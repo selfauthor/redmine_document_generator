@@ -2,7 +2,7 @@
 
 require 'fileutils'
 
-# v2609141325
+# v2609141507
 module DocumentGenerator
   # WordRenderer is responsible for generating Word documents (.docx).
   # It uses TemplateProcessor for archive extraction and saving,
@@ -56,7 +56,26 @@ module DocumentGenerator
     def process_word_xml(doc, context, entry_name)
       ns = { 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main' }
 
-      # 1. Process loops (row cloning)
+      # ШАГ 1: Принудительно склеиваем разбитые Word'ом текстовые узлы внутри абзаца,
+      # если в этом абзаце обнаружены маркеры <% ... %>
+      doc.xpath('//w:p', ns).each do |para|
+        text_nodes = para.xpath('.//w:t', ns).to_a
+        next if text_nodes.empty?
+
+        full_text = text_nodes.map(&:text).join
+
+        if full_text.include?('<%') && full_text.include?('%>')
+          # Записываем полный, склеенный текст в самый первый узел <w:t>
+          first_node = text_nodes.first
+          first_node.content = full_text
+
+          # Удаляем все последующие узлы <w:t> и их родительские <w:r>,
+          # чтобы избежать дублирования текста в итоговом документе
+          text_nodes[1..-1].each { |node| node.parent.remove }
+        end
+      end
+
+      # ШАГ 2: Дальнейшая обработка (теперь маркеры гарантированно целые)
       if @parser_config[:blocks][:row] && context['records'].present?
         nodes_to_process = doc.xpath('//w:p | //w:tr', ns)
         
@@ -66,24 +85,23 @@ module DocumentGenerator
 
           clean_node_text(node, ns)
 
-          # Clone the node for each record and substitute data
           context['records'].each_with_index do |record, _index|
             clone = node.dup
             
             clone.xpath('.//w:t', ns).each do |text_node|
               original_text = text_node.text
-              text_node.content = TemplateProcessor.substitute_markers(original_text, record)
+              full_context = context.merge(record)
+              text_node.content = TemplateProcessor.substitute_markers(original_text, full_context)
             end
             
             node.add_next_sibling(clone)
           end
 
-          # Remove the original template node (which only contained markers)
           node.remove
         end
       else
-        # 2. If no loops (or single file mode), replace markers globally
-        render_context = context['records'].first || context
+        first_record = context['records'].first || {}
+        render_context = context.merge(first_record)
         
         doc.xpath('//w:t', ns).each do |text_node|
           original_text = text_node.text

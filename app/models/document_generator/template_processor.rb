@@ -3,7 +3,7 @@
 require 'zip'
 require 'nokogiri'
 
-# v2609141321
+# v2609141507
 module DocumentGenerator
   # TemplateProcessor отвечает за общую логику обработки шаблонов.
   # Он абстрагирует работу с ZIP-архивами (форматы .docx и .xlsx)
@@ -43,15 +43,18 @@ module DocumentGenerator
       def substitute_markers(text, context)
         return text if text.blank? || !text.include?('<%')
 
-        text.gsub(/<%\s*([^%]+?)\s*%>/) do |match|
+        result = text.gsub(/<%\s*([^%]+?)\s*%>/) do |match|
           marker_content = $1.strip
           
-          # Игнорируем управляющие маркеры, они обрабатываются на уровне XML-узлов
-          next match if marker_content.match?(/^(BEGIN_|END_|IF|ELSE|GROUP_BY)/i)
+          if marker_content.match?(/^(BEGIN_|END_|IF|ELSE|GROUP_BY)/i)
+            next match
+          end
 
           resolved_value = resolve_value(marker_content, context)
-          resolved_value.to_s
+          replacement = resolved_value.nil? ? '' : resolved_value.to_s
+          replacement
         end
+        result
       end
 
       # Универсальный метод для обработки ZIP-архива шаблона.

@@ -3,7 +3,7 @@
 require 'rubyXL'
 require 'fileutils'
 
-# v2609141326
+# v2609141507
 module DocumentGenerator
   # ExcelRenderer is responsible for generating Excel documents (.xlsx).
   # It uses the rubyXL library to preserve formatting,
@@ -28,7 +28,6 @@ module DocumentGenerator
       output_path = "#{@template_path}.output.xlsx"
 
       begin
-        Rails.logger.info "[DocumentGenerator] Parsing Excel template: #{@template_path}"
         workbook = RubyXL::Parser.parse(@template_path)
 
         workbook.worksheets.each do |worksheet|
@@ -36,7 +35,6 @@ module DocumentGenerator
         end
 
         workbook.write(output_path)
-        Rails.logger.info "[DocumentGenerator] Excel generation completed: #{output_path}"
         output_path
         
       rescue StandardError => e
@@ -113,7 +111,7 @@ module DocumentGenerator
     # @param row [RubyXL::Row] The Excel row
     def clean_row_markers(row)
       row.cells.each do |cell|
-        next unless cell && cell.value.is_a?(aString)
+        next unless cell && cell.value.is_a?(String)
         
         cell.value = cell.value.gsub(/<%\s*(BEGIN_ROW|END_ROW|GROUP_BY|GROUP_BY_2)\s*%>/i, '').strip
         cell.value = nil if cell.value.empty?
