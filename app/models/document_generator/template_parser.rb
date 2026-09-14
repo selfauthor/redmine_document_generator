@@ -23,8 +23,8 @@ module DocumentGenerator
 
     def parse
       text = extract_text
-      config[:template_text] = text
       config = {
+        template_text: text,
         group_by: nil,
         group_by_2: nil,
         blocks: {
@@ -98,4 +98,5 @@ module DocumentGenerator
       xml.xpath(xpath, ns).map(&:text).join(' ')
     end
   end
+  # v2609101627
 end

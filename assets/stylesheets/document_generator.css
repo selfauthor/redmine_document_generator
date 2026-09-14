@@ -7,8 +7,8 @@
   text-decoration: underline;
 }
 
-/* Дополнительный стиль для ошибки имени файла (класс .error уже есть в Redmine, но можно уточнить) */
-#dg-filename-error {
+/* Дополнительный стиль для ошибок (класс .error уже есть в Redmine, но можно уточнить) */
+#document-generator-form span.error {
   color: #d9534f;
   font-size: 0.9em;
   display: block;

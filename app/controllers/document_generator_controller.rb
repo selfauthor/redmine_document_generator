@@ -1,16 +1,50 @@
 # frozen_string_literal: true
 
+# v2609111239
 class DocumentGeneratorController < ApplicationController
+  include QueriesHelper
+  
   before_action :find_project
   before_action :authorize_document_generator
   before_action :check_gems_loaded, only: [:export]
 
-  # GET /projects/:project_id/document_generator/dialog
-  # Открывает модальное окно с подсчётом записей по текущему фильтру
   def dialog
-    @query = IssueQuery.new(name: '_document_generator_temp', project: @project)
-    @query.build_from_params(params)
+    # Копируем логику из IssuesController#index
+    use_session = true
+    
+    # Копируем retrieve_default_query
+    unless params[:query_id].present? || api_request? || params[:set_filter]
+      if params[:without_default].present?
+        params[:set_filter] = 1
+      elsif !params[:set_filter] && use_session && session[:issue_query]
+        query_id, project_id = session[:issue_query].values_at(:id, :project_id)
+        unless query_id && project_id == @project&.id && IssueQuery.exists?(id: query_id)
+          # continue
+        end
+      end
+      
+      if default_query = IssueQuery.default(project: @project)
+        params[:query_id] = default_query.id
+      end
+    end
+    
+    # Используем retrieve_query из QueriesHelper
+    retrieve_query(IssueQuery, use_session)
+    
     @record_count = @query.issue_count
+    
+    # Сохраняем параметры фильтра для передачи в export
+    @filter_params = {
+      'f' => @query.filters.keys,
+      'op' => @query.filters.transform_values { |v| v[:operator] },
+      'v' => @query.filters.transform_values { |v| v[:values] },
+      'sort' => @query.sort_criteria.to_param,
+      'group_by' => @query.group_by,
+      'c' => @query.column_names
+    }.compact
+    
+    # Добавляем query_id, если есть
+    @filter_params['query_id'] = params[:query_id] if params[:query_id].present?
 
     respond_to do |format|
       format.js
@@ -32,6 +66,13 @@ class DocumentGeneratorController < ApplicationController
       redirect_back(fallback_location: project_issues_path(@project)) and return
     end
 
+    # Валидация формата файла шаблона (только .docx и .xlsx)
+    unless @template_file && valid_template_extension?(@template_file.original_filename)
+      flash[:error] = I18n.t('document_generator.error_invalid_format')
+      redirect_back(fallback_location: project_issues_path(@project)) and return
+    end
+
+    # Получение выборки записей с учётом фильтра и прав доступа
     data_provider = DocumentGenerator::DataProvider.new(@project, User.current, params)
     @issues = data_provider.fetch_issues
 
@@ -66,8 +107,11 @@ class DocumentGeneratorController < ApplicationController
       flash[:error] = e.message
       redirect_back(fallback_location: project_issues_path(@project))
     rescue StandardError => e
-      Rails.logger.error("[DocumentGenerator] Unexpected error: #{e.message}\n#{e.backtrace.join("\n")}")
-      flash[:error] = I18n.t('document_generator.error_render_failed', message: e.message)
+      # Логируем полную ошибку с backtrace в журнал
+      Rails.logger.error("[DocumentGenerator] Unexpected error: #{e.message}\n#{e.backtrace&.join("\n")}")
+      # В flash записываем только короткое сообщение, чтобы избежать CookieOverflow
+      short_msg = e.message.to_s.truncate(200)
+      flash[:error] = I18n.t('document_generator.error_render_failed', message: short_msg)
       redirect_back(fallback_location: project_issues_path(@project))
     ensure
       FileUtils.rm_f(temp_template_path) if temp_template_path && File.exist?(temp_template_path)
@@ -159,5 +203,13 @@ class DocumentGeneratorController < ApplicationController
     when '.xlsx' then 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     else 'application/octet-stream'
     end
+  end
+
+  # Проверяет, что расширение файла шаблона поддерживается (.docx или .xlsx)
+  # @param filename [String] Имя загруженного файла
+  # @return [Boolean] true, если расширение допустимо
+  def valid_template_extension?(filename)
+    ext = File.extname(filename).downcase
+    %w[.docx .xlsx].include?(ext)
   end
 end

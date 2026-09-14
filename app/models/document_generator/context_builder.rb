@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# v2609111409
 module DocumentGenerator
   # Класс отвечает за подготовку структурированных данных (контекста) 
   # из массива записей для последующей передачи в рендереры (Word/Excel).
@@ -150,10 +151,12 @@ module DocumentGenerator
       end
 
       if issue.parent
-        parent_prefix = 'Parent.'
-        hash["#{parent_prefix}#{I18n.t('field_subject', default: 'Subject')}"] = issue.parent.subject
-        hash["#{parent_prefix}#{I18n.t('field_status', default: 'Status')}"] = issue.parent.status&.name
-        hash["#{parent_prefix}#{I18n.t('field_assigned_to', default: 'Assigned to')}"] = issue.parent.assigned_to&.name
+        hash['Parent'] = {
+          I18n.t('field_subject', default: 'Subject') => issue.parent.subject,
+          I18n.t('field_status', default: 'Status') => issue.parent.status&.name,
+          I18n.t('field_assigned_to', default: 'Assigned to') => issue.parent.assigned_to&.name,
+          'ID' => issue.parent.id
+        }
       end
 
       issue.custom_field_values.each do |cfv|
@@ -161,7 +164,7 @@ module DocumentGenerator
         hash[cfv.custom_field.name] = self.class.format_value(val)
       end
 
-      hash['subtasks'] = issue.children.map do |child|
+      hash['subtasks'] = Issue.where(parent_id: issue.id).includes(:status, :assigned_to).map do |child|
         {
           'ID' => child.id,
           I18n.t('field_subject', default: 'Subject') => child.subject,

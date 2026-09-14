@@ -5,7 +5,8 @@
   <fieldset class="box">
     <legend><%= l('document_generator.template_file') %></legend>
     <p>
-      <%= file_field_tag 'template_file', accept: '.docx,.xlsx,.doc,.xls', required: true %>
+      <%= file_field_tag 'template_file', accept: '.docx,.xlsx', required: true %>
+      <span id="dg-template-error" class="error" style="display:none;"><%= l('document_generator.error_invalid_format') %></span>
     </p>
   </fieldset>
 
@@ -51,4 +52,28 @@
     <%= link_to l('button_cancel'), '#', onclick: "hideModal(this); return false;" %>
   </p>
 
+  <!-- Скрытые поля для передачи параметров фильтра -->
+  <% if @filter_params.present? %>
+    <% @filter_params.each do |key, value| %>
+      <% if value.is_a?(Hash) %>
+        <% value.each do |k, v| %>
+          <% if v.is_a?(Array) %>
+            <% v.each do |val| %>
+              <%= hidden_field_tag "#{key}[#{k}][]", val %>
+            <% end %>
+          <% else %>
+            <%= hidden_field_tag "#{key}[#{k}]", v %>
+          <% end %>
+        <% end %>
+      <% elsif value.is_a?(Array) %>
+        <% value.each do |v| %>
+          <%= hidden_field_tag "#{key}[]", v %>
+        <% end %>
+      <% else %>
+        <%= hidden_field_tag key, value %>
+      <% end %>
+    <% end %>
+  <% end %>
+
 <% end %>
+<!-- 2610091537 -->
