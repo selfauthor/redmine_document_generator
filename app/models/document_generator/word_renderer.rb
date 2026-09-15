@@ -12,17 +12,14 @@ module DocumentGenerator
     def render
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
       output_path = "#{@template_path}.output.docx"
-
       xml_targets = [
         'word/document.xml',
         'word/header*.xml',
         'word/footer*.xml'
       ]
-
       TemplateProcessor.process_archive(@template_path, output_path, xml_targets) do |doc, entry_name|
         process_word_xml(doc, context, entry_name)
       end
-
       output_path
     rescue StandardError => e
       Rails.logger.error "[DocumentGenerator] Word render failed: #{e.message}\n#{e.backtrace&.join("\n")}"
@@ -39,7 +36,6 @@ module DocumentGenerator
       # 1. Обработка циклов (клонирование строк)
       if @parser_config[:blocks][:row] && records.present?
         all_nodes = doc.xpath('//w:tr | //w:p[not(ancestor::w:tr)]', ns)
-        
         start_node = nil
         end_node = nil
         template_nodes = []
@@ -47,12 +43,10 @@ module DocumentGenerator
 
         all_nodes.each do |node|
           text = node.xpath('.//w:t', ns).map(&:text).join
-          
           if !in_block && text.include?('<%BEGIN_ROW%>')
             in_block = true
             start_node = node
             template_nodes << node
-            
             if text.include?('<%END_ROW%>')
               end_node = node
               in_block = false
@@ -73,23 +67,17 @@ module DocumentGenerator
             error_msg = I18n.t('document_generator.error_row_block_mismatch')
             raise DocumentGenerator::TemplateError, error_msg
           end
-
           parent = start_node.parent
           template_nodes.each(&:remove)
-          
           template_nodes.each do |node|
             clean_node_text(node, ns)
           end
-
           records.each do |record|
             merged_context = context.merge(record)
-            
             template_nodes.each do |template_node|
               clone = template_node.dup
-              
-              # ВАЖНО: применяем склейку и подстановку к каждому клону
-              join_and_substitute_block(clone, merged_context, ns)
-              
+              # СПЕЦИФИКА WORD: обработка XML-узлов с сохранением форматирования
+              process_word_block(clone, merged_context, ns)
               parent.add_child(clone)
             end
           end
@@ -100,69 +88,99 @@ module DocumentGenerator
       end
 
       # 2. Глобальная подстановка для ВСЕГО документа
-      # Используем тот же надежный метод склейки для абзацев и строк таблиц,
-      # чтобы гарантированно найти и заменить маркеры вроде <%ProjectName%>, 
-      # даже если Word разбил их на части.
       render_context = context.merge(context['records'].first || {})
-      
       doc.xpath('//w:p | //w:tr', ns).each do |block_node|
-        # Пропускаем блоки, которые уже были обработаны как часть цикла строк
         next if block_node.name == 'tr' && @parser_config[:blocks][:row] && 
                 block_node.xpath('.//w:t', ns).map(&:text).join.include?('BEGIN_ROW')
-
-        join_and_substitute_block(block_node, render_context, ns)
+        # СПЕЦИФИКА WORD: обработка XML-узлов
+        process_word_block(block_node, render_context, ns)
       end
     end
 
-    # Склеивает все текстовые узлы (<w:t>) внутри блока (<w:p> или <w:tr>) в одну строку,
-    # выполняет подстановку маркеров, а затем помещает результат в первый текстовый узел,
-    # очищая остальные. Это решает проблему разбитых маркеров Word-ом.
+    # Обрабатывает блок Word (абзац или строку таблицы):
+    # 1. Сначала применяет условия (общая логика из TemplateProcessor)
+    # 2. Затем подставляет значения с сохранением форматирования
     #
-    # @param block_node [Nokogiri::XML::Node] Узел абзаца или строки таблицы
+    # @param block_node [Nokogiri::XML::Node] Узел w:p или w:tr
     # @param context [Hash] Данные для подстановки
-    # @param ns [Hash] Пространство имен XML
+    # @param ns [Hash] Пространства имен XML
+    def process_word_block(block_node, context, ns)
+      runs = block_node.xpath('.//w:r', ns)
+      return if runs.empty?
+
+      # 1. Сначала обрабатываем условия (ОБЩАЯ ЛОГИКА)
+      # Собираем весь текст, обрабатываем условия, затем разбираем обратно по узлам
+      full_text = runs.map { |r| r.xpath('.//w:t', ns).map(&:text).join }.join
+      processed_text = TemplateProcessor.resolve_conditionals(full_text, context)
+      
+      # Применяем обработанный текст обратно к узлам
+      if full_text != processed_text
+        apply_text_to_runs(runs, processed_text, ns)
+      end
+
+      # 2. Подставляем значения (ОБЩАЯ ЛОГИКА + СПЕЦИФИКА WORD)
+      join_and_substitute_block(block_node, context, ns)
+    end
+
+    # Применяет текст обратно к XML-узлам w:r, сохраняя их структуру
+    def apply_text_to_runs(runs, new_text, ns)
+      current_pos = 0
+      runs.each do |run|
+        t_nodes = run.xpath('.//w:t', ns)
+        next if t_nodes.empty?
+
+        run_length = t_nodes.map(&:text).join.length
+        if current_pos < new_text.length
+          chunk = new_text[current_pos, run_length] || ""
+          t_nodes.first.content = chunk
+          t_nodes[1..-1].each { |t| t.content = "" } if t_nodes.size > 1
+        end
+        current_pos += run_length
+      end
+    end
+
+    # СПЕЦИФИКА WORD: склеивает текстовые узлы внутри блока и подставляет значения,
+    # сохраняя форматирование первого w:r (шрифт, цвет, жирность и т.д.)
+    #
+    # @param block_node [Nokogiri::XML::Node] Узел w:p или w:tr
+    # @param context [Hash] Данные для подстановки
+    # @param ns [Hash] Пространства имен XML
     def join_and_substitute_block(block_node, context, ns)
       text_nodes = block_node.xpath('.//w:t', ns)
       return if text_nodes.empty?
 
-      # 1. Собираем весь текст блока в одну строку
+      # 1. Собираем весь текст блока
       original_text = text_nodes.map(&:text).join
-
-      # 2. Очищаем от управляющих маркеров, которые не должны попадать в итоговый текст
-      cleaned_text = original_text.gsub(/<%\s*(BEGIN_ROW|END_ROW|BEGIN_SUBTASKS|END_SUBTASKS|BEGIN_WATCHERS|END_WATCHERS|BEGIN_RELATIONS|END_RELATIONS|BEGIN_GROUP_HEADER|END_GROUP_HEADER|BEGIN_GROUP_HEADER_2|END_GROUP_HEADER_2|BEGIN_GROUP_FOOTER|END_GROUP_FOOTER|BEGIN_GROUP_FOOTER_2|END_GROUP_FOOTER_2|BEGIN_TOTAL|END_TOTAL|GROUP_BY|GROUP_BY_2)\s*%>/i, '')
-
-      # 3. Выполняем подстановку данных
+      
+      # 2. Очищаем от управляющих маркеров (ОБЩАЯ ЛОГИКА)
+      cleaned_text = TemplateProcessor.clean_control_markers(original_text)
+      
+      # 3. Подставляем значения (ОБЩАЯ ЛОГИКА)
       substituted_text = TemplateProcessor.substitute_markers(cleaned_text, context)
 
-      # 4. Если текст изменился, перезаписываем структуру блока
+      # 4. Если текст изменился, перезаписываем с сохранением форматирования
       if original_text != substituted_text
         runs = block_node.xpath('.//w:r', ns)
         if runs.any?
           first_run = runs.first
-          
-          # Находим или создаем узел w:t в первом прогоне (w:r)
           text_node = first_run.at_xpath('.//w:t', ns)
           unless text_node
             text_node = Nokogiri::XML::Node.new('w:t', block_node.document)
+            text_node['xml:space'] = 'preserve'
             first_run.add_child(text_node)
           end
-          
-          # Сохраняем атрибут пробелов, чтобы Word не схлопывал их
-          text_node['xml:space'] = 'preserve'
           text_node.content = substituted_text
-
-          # Очищаем все остальные текстовые узлы в этом блоке, чтобы избежать дублирования текста
-          text_nodes.each do |t_node|
-            t_node.content = '' unless t_node == text_node
-          end
+          # Очищаем остальные узлы, чтобы не было дублирования
+          text_nodes.each { |t| t.content = '' unless t == text_node }
         end
       end
     end
 
+    # СПЕЦИФИКА WORD: очищает управляющие маркеры из узлов
     def clean_node_text(node, ns)
       node.xpath('.//w:t', ns).each do |text_node|
         text = text_node.text
-        cleaned = text.gsub(/<%\s*(BEGIN_ROW|END_ROW|BEGIN_SUBTASKS|END_SUBTASKS|BEGIN_WATCHERS|END_WATCHERS|BEGIN_RELATIONS|END_RELATIONS|BEGIN_GROUP_HEADER|END_GROUP_HEADER|BEGIN_GROUP_HEADER_2|END_GROUP_HEADER_2|BEGIN_GROUP_FOOTER|END_GROUP_FOOTER|BEGIN_GROUP_FOOTER_2|END_GROUP_FOOTER_2|BEGIN_TOTAL|END_TOTAL|GROUP_BY|GROUP_BY_2)\s*%>/i, '')
+        cleaned = TemplateProcessor.clean_control_markers(text)
         text_node.content = cleaned
       end
     end
@@ -180,5 +198,5 @@ module DocumentGenerator
       end
     end
   end
-  # v2609150946
 end
+# v2609151130
