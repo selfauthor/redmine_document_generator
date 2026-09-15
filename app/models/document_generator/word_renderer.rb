@@ -1,17 +1,7 @@
 # frozen_string_literal: true
 
-require 'fileutils'
-
-# v2609141507
 module DocumentGenerator
-  # WordRenderer is responsible for generating Word documents (.docx).
-  # It uses TemplateProcessor for archive extraction and saving,
-  # but manages row cloning and text replacement in <w:t> nodes specifically for Word XML.
   class WordRenderer
-    # @param template_path [String] Path to the temporary template file
-    # @param issues [ActiveRecord::Relation] The collection of records to export
-    # @param parser_config [Hash] Configuration from TemplateParser
-    # @param error_behavior [String] Error handling strategy ('abort', 'skip_field', 'skip_record')
     def initialize(template_path, issues, parser_config, error_behavior)
       @template_path = template_path
       @issues = issues
@@ -19,14 +9,10 @@ module DocumentGenerator
       @error_behavior = error_behavior
     end
 
-    # Main document generation method.
-    #
-    # @return [String] Path to the generated .docx file
     def render
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
       output_path = "#{@template_path}.output.docx"
 
-      # XML targets inside .docx that may contain data
       xml_targets = [
         'word/document.xml',
         'word/header*.xml',
@@ -46,94 +32,153 @@ module DocumentGenerator
 
     private
 
-    # Processes a specific Word XML file.
-    # Finds row blocks (BEGIN_ROW/END_ROW) for cloning,
-    # then replaces markers in all text nodes.
-    #
-    # @param doc [Nokogiri::XML::Document] The Word XML document
-    # @param context [Hash] Data for substitution
-    # @param entry_name [String] Name of the file being processed inside the archive
     def process_word_xml(doc, context, entry_name)
       ns = { 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main' }
+      records = context['records'] || []
 
-      # ШАГ 1: Принудительно склеиваем разбитые Word'ом текстовые узлы внутри абзаца,
-      # если в этом абзаце обнаружены маркеры <% ... %>
-      doc.xpath('//w:p', ns).each do |para|
-        text_nodes = para.xpath('.//w:t', ns).to_a
-        next if text_nodes.empty?
+      # 1. Обработка циклов (клонирование строк)
+      if @parser_config[:blocks][:row] && records.present?
+        all_nodes = doc.xpath('//w:tr | //w:p[not(ancestor::w:tr)]', ns)
+        
+        start_node = nil
+        end_node = nil
+        template_nodes = []
+        in_block = false
 
-        full_text = text_nodes.map(&:text).join
+        all_nodes.each do |node|
+          text = node.xpath('.//w:t', ns).map(&:text).join
+          
+          if !in_block && text.include?('<%BEGIN_ROW%>')
+            in_block = true
+            start_node = node
+            template_nodes << node
+            
+            if text.include?('<%END_ROW%>')
+              end_node = node
+              in_block = false
+              break
+            end
+          elsif in_block
+            template_nodes << node
+            if text.include?('<%END_ROW%>')
+              end_node = node
+              in_block = false
+              break
+            end
+          end
+        end
 
-        if full_text.include?('<%') && full_text.include?('%>')
-          # Записываем полный, склеенный текст в самый первый узел <w:t>
-          first_node = text_nodes.first
-          first_node.content = full_text
+        if start_node && end_node
+          if start_node.parent != end_node.parent
+            error_msg = I18n.t('document_generator.error_row_block_mismatch')
+            raise DocumentGenerator::TemplateError, error_msg
+          end
 
-          # Удаляем все последующие узлы <w:t> и их родительские <w:r>,
-          # чтобы избежать дублирования текста в итоговом документе
-          text_nodes[1..-1].each { |node| node.parent.remove }
+          parent = start_node.parent
+          template_nodes.each(&:remove)
+          
+          template_nodes.each do |node|
+            clean_node_text(node, ns)
+          end
+
+          records.each do |record|
+            merged_context = context.merge(record)
+            
+            template_nodes.each do |template_node|
+              clone = template_node.dup
+              
+              # ВАЖНО: применяем склейку и подстановку к каждому клону
+              join_and_substitute_block(clone, merged_context, ns)
+              
+              parent.add_child(clone)
+            end
+          end
+        else
+          error_msg = I18n.t('document_generator.error_missing_end_row')
+          raise DocumentGenerator::TemplateError, error_msg
         end
       end
 
-      # ШАГ 2: Дальнейшая обработка (теперь маркеры гарантированно целые)
-      if @parser_config[:blocks][:row] && context['records'].present?
-        nodes_to_process = doc.xpath('//w:p | //w:tr', ns)
-        
-        nodes_to_process.each do |node|
-          text = node.xpath('.//w:t', ns).map(&:text).join
-          next unless text.include?('<%BEGIN_ROW%>')
+      # 2. Глобальная подстановка для ВСЕГО документа
+      # Используем тот же надежный метод склейки для абзацев и строк таблиц,
+      # чтобы гарантированно найти и заменить маркеры вроде <%ProjectName%>, 
+      # даже если Word разбил их на части.
+      render_context = context.merge(context['records'].first || {})
+      
+      doc.xpath('//w:p | //w:tr', ns).each do |block_node|
+        # Пропускаем блоки, которые уже были обработаны как часть цикла строк
+        next if block_node.name == 'tr' && @parser_config[:blocks][:row] && 
+                block_node.xpath('.//w:t', ns).map(&:text).join.include?('BEGIN_ROW')
 
-          clean_node_text(node, ns)
+        join_and_substitute_block(block_node, render_context, ns)
+      end
+    end
 
-          context['records'].each_with_index do |record, _index|
-            clone = node.dup
-            
-            clone.xpath('.//w:t', ns).each do |text_node|
-              original_text = text_node.text
-              full_context = context.merge(record)
-              text_node.content = TemplateProcessor.substitute_markers(original_text, full_context)
-            end
-            
-            node.add_next_sibling(clone)
+    # Склеивает все текстовые узлы (<w:t>) внутри блока (<w:p> или <w:tr>) в одну строку,
+    # выполняет подстановку маркеров, а затем помещает результат в первый текстовый узел,
+    # очищая остальные. Это решает проблему разбитых маркеров Word-ом.
+    #
+    # @param block_node [Nokogiri::XML::Node] Узел абзаца или строки таблицы
+    # @param context [Hash] Данные для подстановки
+    # @param ns [Hash] Пространство имен XML
+    def join_and_substitute_block(block_node, context, ns)
+      text_nodes = block_node.xpath('.//w:t', ns)
+      return if text_nodes.empty?
+
+      # 1. Собираем весь текст блока в одну строку
+      original_text = text_nodes.map(&:text).join
+
+      # 2. Очищаем от управляющих маркеров, которые не должны попадать в итоговый текст
+      cleaned_text = original_text.gsub(/<%\s*(BEGIN_ROW|END_ROW|BEGIN_SUBTASKS|END_SUBTASKS|BEGIN_WATCHERS|END_WATCHERS|BEGIN_RELATIONS|END_RELATIONS|BEGIN_GROUP_HEADER|END_GROUP_HEADER|BEGIN_GROUP_HEADER_2|END_GROUP_HEADER_2|BEGIN_GROUP_FOOTER|END_GROUP_FOOTER|BEGIN_GROUP_FOOTER_2|END_GROUP_FOOTER_2|BEGIN_TOTAL|END_TOTAL|GROUP_BY|GROUP_BY_2)\s*%>/i, '')
+
+      # 3. Выполняем подстановку данных
+      substituted_text = TemplateProcessor.substitute_markers(cleaned_text, context)
+
+      # 4. Если текст изменился, перезаписываем структуру блока
+      if original_text != substituted_text
+        runs = block_node.xpath('.//w:r', ns)
+        if runs.any?
+          first_run = runs.first
+          
+          # Находим или создаем узел w:t в первом прогоне (w:r)
+          text_node = first_run.at_xpath('.//w:t', ns)
+          unless text_node
+            text_node = Nokogiri::XML::Node.new('w:t', block_node.document)
+            first_run.add_child(text_node)
           end
+          
+          # Сохраняем атрибут пробелов, чтобы Word не схлопывал их
+          text_node['xml:space'] = 'preserve'
+          text_node.content = substituted_text
 
-          node.remove
-        end
-      else
-        first_record = context['records'].first || {}
-        render_context = context.merge(first_record)
-        
-        doc.xpath('//w:t', ns).each do |text_node|
-          original_text = text_node.text
-          text_node.content = TemplateProcessor.substitute_markers(original_text, render_context)
+          # Очищаем все остальные текстовые узлы в этом блоке, чтобы избежать дублирования текста
+          text_nodes.each do |t_node|
+            t_node.content = '' unless t_node == text_node
+          end
         end
       end
     end
 
-    # Removes control markers (e.g., <%BEGIN_ROW%>) from text nodes,
-    # leaving only the visible text.
-    #
-    # @param node [Nokogiri::XML::Node] The <w:p> or <w:tr> node
-    # @param ns [Hash] XML namespace
     def clean_node_text(node, ns)
       node.xpath('.//w:t', ns).each do |text_node|
         text = text_node.text
-        cleaned = text.gsub(/<%\s*(BEGIN_ROW|END_ROW|BEGIN_SUBTASKS|END_SUBTASKS|BEGIN_WATCHERS|END_WATCHERS|BEGIN_RELATIONS|END_RELATIONS|BEGIN_GROUP_HEADER|END_GROUP_HEADER|BEGIN_TOTAL|END_TOTAL)\s*%>/i, '')
+        cleaned = text.gsub(/<%\s*(BEGIN_ROW|END_ROW|BEGIN_SUBTASKS|END_SUBTASKS|BEGIN_WATCHERS|END_WATCHERS|BEGIN_RELATIONS|END_RELATIONS|BEGIN_GROUP_HEADER|END_GROUP_HEADER|BEGIN_GROUP_HEADER_2|END_GROUP_HEADER_2|BEGIN_GROUP_FOOTER|END_GROUP_FOOTER|BEGIN_GROUP_FOOTER_2|END_GROUP_FOOTER_2|BEGIN_TOTAL|END_TOTAL|GROUP_BY|GROUP_BY_2)\s*%>/i, '')
         text_node.content = cleaned
       end
     end
 
-    # Universal error handler.
-    #
-    # @param message [String] The error message (already localized)
     def handle_error(message)
       case @error_behavior
-      when 'abort'
-        raise DocumentGenerator::RenderError, message
-      when 'skip_field', 'skip_record'
-        Rails.logger.error "[DocumentGenerator] Render error (behavior: #{@error_behavior}): #{message}"
-        raise DocumentGenerator::RenderError, message
+      when 'skip_field'
+        Rails.logger.warn "[DocumentGenerator] Render warning (skip_field mode): #{message}"
+        raise DocumentGenerator::TemplateError, message
+      when 'skip_record'
+        Rails.logger.warn "[DocumentGenerator] Render warning (skip_record mode): #{message}"
+        raise DocumentGenerator::TemplateError, message
+      else
+        raise DocumentGenerator::TemplateError, message
       end
     end
   end
+  # v2609150946
 end
