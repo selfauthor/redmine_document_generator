@@ -37,6 +37,9 @@ ru:
     error_excel_render_failed: "Сбой рендеринга Excel: %{message}"
     error_word_render_failed: "Сбой рендеринга Word: %{message}"
     error_row_template_missing: "В шаблоне Excel не найден маркер ROW в первой ячейке строки"
+    error_field_not_found: "Поле '%{field}' не найдено или пусто"
+    error_condition_evaluation: "Ошибка при вычислении условия '%{condition}': %{message}"
+    error_missing_end_marker: "Не найден закрывающий маркер <%END%> для условия IF(%{condition})"
     
     # Вспомогательные строки
     relation_type: "Тип связи"

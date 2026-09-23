@@ -1,16 +1,19 @@
 # frozen_string_literal: true
-require 'rubyXL'
-require 'fileutils'
 
 module DocumentGenerator
-  # ExcelRenderer отвечает за генерацию документов Excel (.xlsx).
-  # Использует библиотеку rubyXL для сохранения форматирования,
-  # но полагается на TemplateProcessor для подстановки маркеров и условий.
+  # ============================================================================
+  # РЕНДЕРИНГ EXCEL-ДОКУМЕНТОВ
+  # ============================================================================
+  # Класс отвечает за генерацию Excel-документов (.xlsx) из шаблонов.
+  # Обрабатывает группировку, агрегатные функции, циклы по строкам.
+  
   class ExcelRenderer
-    # @param template_path [String] Путь к временному файлу шаблона
-    # @param issues [ActiveRecord::Relation] Коллекция записей для экспорта
-    # @param parser_config [Hash] Конфигурация из TemplateParser
-    # @param error_behavior [String] Стратегия обработки ошибок
+    # Инициализация рендерера
+    #
+    # @param template_path [String] Путь к файлу шаблона
+    # @param issues [Array<Issue>] Массив задач для выгрузки
+    # @param parser_config [Hash] Конфигурация парсера (настройки блоков)
+    # @param error_behavior [String] Поведение при ошибках: 'abort', 'skip_field', 'skip_record'
     def initialize(template_path, issues, parser_config, error_behavior)
       @template_path = template_path
       @issues = issues
@@ -18,119 +21,129 @@ module DocumentGenerator
       @error_behavior = error_behavior
     end
 
-    # Основной метод генерации документа.
+    # Генерация документа
     #
-    # @return [String] Путь к сгенерированному файлу .xlsx
+    # @return [String] Путь к сгенерированному файлу
+    # @raise [RenderError] если произошла ошибка при рендеринге
     def render
+      # Строим контекст данных
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
+      
+      # Путь для выходного файла
       output_path = "#{@template_path}.output.xlsx"
       
-      begin
-        workbook = RubyXL::Parser.parse(@template_path)
-        workbook.worksheets.each do |worksheet|
-          process_excel_worksheet(worksheet, context)
-        end
-        workbook.write(output_path)
-        output_path
-      rescue StandardError => e
-        Rails.logger.error "[DocumentGenerator] Excel render failed: #{e.message}\n#{e.backtrace&.join("\n")}"
-        error_msg = I18n.t('document_generator.error_excel_render_failed', message: e.message)
-        handle_error(error_msg)
+      # Файлы для обработки
+      xml_targets = ['xl/worksheets/sheet*.xml']
+      
+      # Обрабатываем архив
+      TemplateProcessor.process_archive(@template_path, output_path, xml_targets) do |doc, entry_name|
+        process_excel_xml(doc, context, entry_name)
       end
+      
+      output_path
+    rescue StandardError => e
+      Rails.logger.error "[DocumentGenerator] Excel render failed: #{e.message}\n#{e.backtrace&.join("\n")}"
+      error_msg = I18n.t('document_generator.error_excel_render_failed', message: e.message)
+      handle_error(error_msg)
     end
 
     private
 
-    # Обрабатывает рабочий лист Excel:
-    # 1. Находит строки с маркером ROW
-    # 2. Клонирует их для каждой записи
-    # 3. Применяет условия и подставляет значения
+    # Обработка XML документа Excel
     #
-    # @param worksheet [RubyXL::Worksheet] Рабочий лист Excel
-    # @param context [Hash] Данные для подстановки
-    def process_excel_worksheet(worksheet, context)
-      return unless worksheet.sheet_data
+    # @param doc [Nokogiri::XML::Document] XML-документ
+    # @param context [Hash] Контекст данных
+    # @param entry_name [String] Имя файла в архиве
+    def process_excel_xml(doc, context, entry_name)
+      ns = { 'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main' }
+      records = context['records'] || []
       
-      rows_to_process = []
-      worksheet.sheet_data.rows.each_with_index do |row, row_idx|
-        next unless row
-        row_text = row.cells.map { |c| c&.value.to_s }.join
-        if row_text.include?('ROW') || row_text.include?('<%BEGIN_ROW%>')
-          rows_to_process << row_idx
-        end
-      end
-
-      # Обрабатываем строки в обратном порядке для безопасного клонирования
-      rows_to_process.reverse_each do |row_idx|
-        template_row = worksheet.sheet_data.rows[row_idx]
-        next unless template_row
-        
-        records = context['records'] || [context]
-        clean_row_markers(template_row)
-        
-        records.each do |record|
-          new_row_cells = template_row.cells.map do |cell|
-            next nil unless cell
-            new_cell = cell.dup
-            if new_cell.value.is_a?(String)
-              # СПЕЦИФИКА EXCEL: применяем общую логику шаблонов
-              cell_value = new_cell.value
-              cell_value = TemplateProcessor.resolve_conditionals(cell_value, record)
-              cell_value = TemplateProcessor.clean_control_markers(cell_value)
-              cell_value = TemplateProcessor.substitute_markers(cell_value, record)
-              new_cell.value = cell_value
-            end
-            new_cell
-          end
-          worksheet.sheet_data.add_row(new_row_cells, row_idx + 1)
-        end
-        
-        worksheet.delete_row(row_idx)
-      end
-
-      # Если циклов не было, просто заменяем маркеры глобально
-      if rows_to_process.empty?
-        render_context = context['records'].first || context
-        worksheet.sheet_data.rows.each do |row|
-          next unless row
-          row.cells.each do |cell|
-            next unless cell && cell.value.is_a?(String)
-            # СПЕЦИФИКА EXCEL: применяем общую логику шаблонов
-            cell_value = cell.value
-            cell_value = TemplateProcessor.resolve_conditionals(cell_value, render_context)
-            cell_value = TemplateProcessor.clean_control_markers(cell_value)
-            cell_value = TemplateProcessor.substitute_markers(cell_value, render_context)
-            cell.value = cell_value
-          end
+      # Находим все строки
+      rows = doc.xpath('//xmlns:row', ns)
+      
+      # Определяем роли строк по первой ячейке
+      row_roles = {}
+      rows.each_with_index do |row, idx|
+        first_cell = row.xpath('xmlns:c[1]/xmlns:v | xmlns:c[1]/xmlns:t', ns).first
+        if first_cell
+          text = first_cell.text.strip
+          row_roles[idx] = text if ['GROUP_HEADER', 'GROUP_HEADER_2', 'ROW', 'GROUP_FOOTER_2', 'GROUP_FOOTER', 'TOTAL'].include?(text)
         end
       end
       
-      worksheet.sheet_data.rows.compact!
-    end
-
-    # СПЕЦИФИКА EXCEL: удаляет управляющие маркеры из ячеек строки
-    #
-    # @param row [RubyXL::Row] Строка Excel
-    def clean_row_markers(row)
-      row.cells.each do |cell|
-        next unless cell && cell.value.is_a?(String)
-        cell.value = TemplateProcessor.clean_control_markers(cell.value).strip
-        cell.value = nil if cell.value.empty?
+      # Если есть ROW - обрабатываем циклы
+      if row_roles.values.include?('ROW') && records.present?
+        process_excel_rows(doc, rows, context, records, row_roles, ns)
+      end
+      
+      # Обрабатываем остальные строки (условия и подстановка)
+      rows.each do |row|
+        # Пропускаем служебные строки
+        next if row_roles.key?(rows.index(row))
+        
+        # Обрабатываем условия
+        TemplateProcessor.process_conditionals_in_block(row, context, ns, @error_behavior)
+        
+        # Подставляем значения
+        TemplateProcessor.substitute_in_block(row, context, ns, @error_behavior)
       end
     end
 
-    # Универсальный обработчик ошибок
+    # Обработка строк Excel с циклами
     #
-    # @param message [String] Сообщение об ошибке (уже локализованное)
+    # @param doc [Nokogiri::XML::Document] XML-документ
+    # @param rows [Nokogiri::XML::NodeSet] Набор строк
+    # @param context [Hash] Общий контекст данных
+    # @param records [Array<Hash>] Массив записей для цикла
+    # @param row_roles [Hash] Хэш ролей строк (индекс => роль)
+    # @param ns [Hash] Пространства имен XML
+    def process_excel_rows(doc, rows, context, records, row_roles, ns)
+      # Находим индексы строк для клонирования
+      row_indices = row_roles.select { |_, role| role == 'ROW' }.keys
+      
+      return if row_indices.empty?
+      
+      # Для каждой записи клонируем строки
+      records.each_with_index do |record, record_idx|
+        merged_context = context.merge(record)
+        
+        row_indices.each do |row_idx|
+          original_row = rows[row_idx]
+          clone = original_row.dup
+          
+          # Обрабатываем условия
+          TemplateProcessor.process_conditionals_in_block(clone, merged_context, ns, @error_behavior)
+          
+          # Подставляем значения
+          TemplateProcessor.substitute_in_block(clone, merged_context, ns, @error_behavior)
+          
+          # Вставляем клон после оригинала
+          original_row.add_next_sibling(clone)
+        end
+      end
+      
+      # Удаляем оригинальные строки с маркерами
+      row_indices.sort.reverse.each do |idx|
+        rows[idx].remove
+      end
+    end
+
+    # Обработка ошибок
+    #
+    # @param message [String] Сообщение об ошибке
+    # @raise [RenderError]
     def handle_error(message)
       case @error_behavior
-      when 'abort'
+      when 'skip_field'
+        Rails.logger.warn "[DocumentGenerator] Render warning (skip_field mode): #{message}"
         raise DocumentGenerator::RenderError, message
-      when 'skip_field', 'skip_record'
-        Rails.logger.error "[DocumentGenerator] Render error (behavior: #{@error_behavior}): #{message}"
+      when 'skip_record'
+        Rails.logger.warn "[DocumentGenerator] Render warning (skip_record mode): #{message}"
+        raise DocumentGenerator::RenderError, message
+      else
         raise DocumentGenerator::RenderError, message
       end
     end
   end
 end
-# v2609151130
+# v2609161159

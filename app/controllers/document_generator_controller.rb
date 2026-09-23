@@ -53,41 +53,29 @@ class DocumentGeneratorController < ApplicationController
   # POST /projects/:project_id/document_generator/export
   # Основной метод генерации и скачивания документа
   def export
-    Rails.logger.info "========================================================"
-    Rails.logger.info "[DOC_GEN_DEBUG] === КОНТРОЛЛЕР: НАЧАЛО EXPORT ==="
-    Rails.logger.info "[DOC_GEN_DEBUG] Все params запроса: #{params.inspect}"
-    
     @template_file = params[:template_file]
     @export_mode = params[:export_mode]
     @file_name = params[:file_name]
     @error_behavior = params[:error_behavior]
 
     if @file_name =~ %r{[/:*?"<>|]}
-      Rails.logger.warn "[DOC_GEN_DEBUG] Ошибка валидации имени файла: #{@file_name}"
       flash[:error] = I18n.t('document_generator.error_invalid_filename')
       redirect_back(fallback_location: project_issues_path(@project)) and return
     end
 
     unless @template_file && valid_template_extension?(@template_file.original_filename)
-      Rails.logger.warn "[DOC_GEN_DEBUG] Ошибка валидации формата файла: #{@template_file&.original_filename}"
       flash[:error] = I18n.t('document_generator.error_invalid_format')
       redirect_back(fallback_location: project_issues_path(@project)) and return
     end
 
-    Rails.logger.info "[DOC_GEN_DEBUG] Вызов DataProvider..."
     data_provider = DocumentGenerator::DataProvider.new(@project, User.current, params)
     @issues = data_provider.fetch_issues
 
-    Rails.logger.info "[DOC_GEN_DEBUG] Результат DataProvider: получено #{@issues.size} задач"
-    
     if @issues.empty?
-      Rails.logger.warn "[DOC_GEN_DEBUG] СПИСОК @issues ПУСТ! Инициируем редирект с ошибкой 'Нет записей для выгрузки'."
       flash[:error] = I18n.t('document_generator.error_no_records')
       redirect_back(fallback_location: project_issues_path(@project)) and return
     end
 
-    Rails.logger.info "[DOC_GEN_DEBUG] Первая задача в выборке: ID=#{@issues.first.id}, Tracker=#{@issues.first.tracker.name}"
-    
     temp_template_path = save_uploaded_template(@template_file)
 
     begin
@@ -110,12 +98,9 @@ class DocumentGeneratorController < ApplicationController
       end
 
     rescue DocumentGenerator::TemplateError, DocumentGenerator::RenderError => e
-      Rails.logger.error "[DOC_GEN_DEBUG] Export failed (Template/Render): #{e.message}"
       flash[:error] = e.message
       redirect_back(fallback_location: project_issues_path(@project))
     rescue StandardError => e
-      Rails.logger.error "[DOC_GEN_DEBUG] Unexpected error: #{e.class} - #{e.message}"
-      Rails.logger.error "[DOC_GEN_DEBUG] Backtrace: #{e.backtrace&.join("\n[DOC_GEN_DEBUG] ")}"
       short_msg = e.message.to_s.truncate(200)
       flash[:error] = I18n.t('document_generator.error_render_failed', message: short_msg)
       redirect_back(fallback_location: project_issues_path(@project))
@@ -218,5 +203,5 @@ class DocumentGeneratorController < ApplicationController
     ext = File.extname(filename).downcase
     %w[.docx .xlsx].include?(ext)
   end
-  # v202609141607
 end
+# v2609151530
