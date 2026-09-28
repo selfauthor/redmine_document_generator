@@ -482,23 +482,47 @@ module DocumentGenerator
     # ==========================================================================
     # ВЫЧИСЛЕНИЕ УСЛОВИЯ
     # ==========================================================================
-    # Вычисляет истинность условия
+    # Вычисляет истинность логического условия на основе переданного контекста данных.
+    # Поддерживает операторы сравнения (==, !=), проверку на наличие непустого значения,
+    # а также специальную проверку на отсутствие элементов в коллекциях (NOT Subtasks, NOT Watchers, NOT Relations).
     #
-    # @param condition_str [String] Строка условия
-    # @param context [Hash] Контекст данных
-    # @return [Boolean] Результат вычисления
+    # @param condition_str [String] Строка условия для вычисления 
+    #   (например, "Статус == 'Закрыт'", "Назначенный != ''" или "NOT Subtasks")
+    # @param context [Hash] Хэш контекста данных, содержащий значения полей текущей записи и вложенных сущностей
+    # @return [Boolean] true, если условие истинно; false в противном случае
     def self.evaluate_condition(condition_str, context)
       condition_str = condition_str.strip
+      
+      # Поддержка проверки на пустоту коллекций (например, <%IF(NOT Subtasks)%>)
+      if condition_str =~ /^NOT\s+(.+)/i
+        key = $1.strip
+        if key == 'Subtasks' || key == 'subtasks'
+          return (context['subtasks'] || []).empty?
+        elsif key == 'Watchers' || key == 'watchers'
+          return (context['watchers'] || []).empty?
+        elsif key == 'Relations' || key == 'relations'
+          return (context['relations'] || []).empty?
+        else
+          val = get_context_value(key, context)
+          return val.to_s.strip.empty?
+        end
+      end
+      
+      # Поддержка оператора равенства (==)
       if condition_str.include?('==')
         left, right = condition_str.split('==', 2).map(&:strip)
-        right = right.gsub(/^['"]|['"]$/, '')
+        right = right.gsub(/^['"]|['"]$/, '') # Удаляем кавычки из строкового литерала
         left_val = get_context_value(left, context)
         return left_val.to_s.strip == right.to_s.strip
+        
+      # Поддержка оператора неравенства (!=)
       elsif condition_str.include?('!=')
         left, right = condition_str.split('!=', 2).map(&:strip)
-        right = right.gsub(/^['"]|['"]$/, '')
+        right = right.gsub(/^['"]|['"]$/, '') # Удаляем кавычки из строкового литерала
         left_val = get_context_value(left, context)
         return left_val.to_s.strip != right.to_s.strip
+        
+      # Проверка на наличие любого непустого значения (если нет операторов)
       else
         val = get_context_value(condition_str, context)
         return !val.to_s.strip.empty?
@@ -564,6 +588,106 @@ module DocumentGenerator
         end
       end
     end
+
+    # ==========================================================================
+    # ОБРАБОТКА КОЛЛЕКЦИЙ (ПОДЗАДАЧИ, НАБЛЮДАТЕЛИ, СВЯЗИ)
+    # ==========================================================================
+    # Унифицированный метод для Word и Excel. Разворачивает блоки BEGIN_.../END_...
+    # Принимает массив узлов и работает с ним как с единым целым (аналогично process_row_blocks).
+    #
+    # @param block_nodes [Array<Nokogiri::XML::Node>] Массив XML-узлов (абзацы, строки таблиц)
+    # @param context [Hash] Контекст данных
+    # @param ns [Hash] Пространства имен XML
+    # @param error_behavior [String] Поведение при ошибках ('abort', 'skip_field', 'skip_record')
+    # @return [Array<Nokogiri::XML::Node>] Массив узлов с развернутыми коллекциями
+    def self.process_collection_blocks(block_nodes, context, ns, error_behavior)
+      collections_config = {
+        'SUBTASKS' => { context_key: 'subtasks', item_prefix: 'Subtask' },
+        'WATCHERS' => { context_key: 'watchers', item_prefix: 'Watcher' },
+        'RELATIONS' => { context_key: 'relations', item_prefix: 'Relation' }
+      }
+
+      is_word = ns.key?('w')
+      text_xpath = is_word ? './/w:t' : './/xmlns:t | .//xmlns:v'
+
+      collections_config.each do |marker_base, config|
+        begin_marker = "<%BEGIN_#{marker_base}%>"
+        end_marker = "<%END_#{marker_base}%>"
+
+        # Ищем begin и end блоки в пределах ВСЕХ узлов (как в process_row_blocks)
+        begin_idx = block_nodes.index { |b| b.xpath(text_xpath, ns).map(&:text).join.include?(begin_marker) }
+        end_idx = block_nodes.index { |b| b.xpath(text_xpath, ns).map(&:text).join.include?(end_marker) }
+
+        next unless begin_idx && end_idx
+
+        if begin_idx == end_idx
+          # Случай 1: Маркеры находятся внутри одного блока (ячейки или абзаца)
+          block = block_nodes[begin_idx]
+          block_text = block.xpath(text_xpath, ns).map(&:text).join
+          regex = /<%\s*BEGIN_#{marker_base}\s*%>(.*?)<%\s*END_#{marker_base}\s*%>/im
+          
+          new_block_text = block_text.gsub(regex) do |match|
+            inner_template = $1.strip
+            collection_data = context[config[:context_key]] || []
+            
+            if collection_data.empty?
+              "" # Блок просто не выводится, если коллекция пуста
+            else
+              expanded_items = collection_data.map do |item|
+                item_context = context.merge(config[:item_prefix] => item)
+                substitute_markers(inner_template, item_context, error_behavior)
+              end
+              expanded_items.join("\n")
+            end
+          end
+          
+          # Очищаем старые текстовые узлы и записываем развернутый текст в первый
+          block.xpath(text_xpath, ns).each { |n| n.content = '' }
+          first_text_node = block.xpath(text_xpath, ns).first
+          first_text_node.content = new_block_text if first_text_node
+          
+        elsif end_idx > begin_idx
+          # Случай 2: Маркеры в разных блоках (клонируем целые строки/абзацы)
+          template_blocks = block_nodes[(begin_idx + 1)...end_idx]
+          
+          # Очищаем маркеры из граничных блоков
+          begin_block = block_nodes[begin_idx]
+          end_block = block_nodes[end_idx]
+          begin_block.xpath(text_xpath, ns).each { |n| n.content = clean_control_markers(n.content) }
+          end_block.xpath(text_xpath, ns).each { |n| n.content = clean_control_markers(n.content) }
+          
+          # Удаляем шаблонные блоки и граничные маркеры из массива
+          block_nodes = block_nodes[0..begin_idx] + block_nodes[(end_idx + 1)..-1]
+          
+          collection_data = context[config[:context_key]] || []
+          
+          if collection_data.empty?
+            next
+          end
+          
+          # Разворачиваем коллекцию
+          expanded_blocks = []
+          collection_data.each do |item|
+            item_context = context.merge(config[:item_prefix] => item)
+            template_blocks.each do |tmpl_block|
+              clone = tmpl_block.dup
+              # ВАЖНО: Вызываем process_conditionals_in_block и substitute_in_block ЗДЕСЬ,
+              # потому что только здесь доступен правильный item_context с ключом Subtask/Watcher/Relation
+              process_conditionals_in_block(clone, item_context, ns, error_behavior)
+              substitute_in_block(clone, item_context, ns, error_behavior)
+              expanded_blocks << clone
+            end
+          end
+          
+          # Вставляем развернутые блоки после begin
+          insert_idx = begin_idx + 1
+          block_nodes = block_nodes[0...insert_idx] + expanded_blocks + block_nodes[insert_idx..-1]
+        end
+      end
+      
+      block_nodes
+    end
+
   end
 end
-# v2609231430
+# v2609281204

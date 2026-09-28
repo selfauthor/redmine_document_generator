@@ -81,10 +81,11 @@ module DocumentGenerator
         # Пропускаем служебные строки
         next if row_roles.key?(rows.index(row))
         
-        # Обрабатываем условия
+        # 1. Обрабатываем коллекции
+        TemplateProcessor.process_collection_blocks(row, context, ns, @error_behavior)
+        # 2. Обрабатываем условия
         TemplateProcessor.process_conditionals_in_block(row, context, ns, @error_behavior)
-        
-        # Подставляем значения
+        # 3. Подставляем значения
         TemplateProcessor.substitute_in_block(row, context, ns, @error_behavior)
       end
     end
@@ -111,12 +112,13 @@ module DocumentGenerator
           original_row = rows[row_idx]
           clone = original_row.dup
           
-          # Обрабатываем условия
+           # 1. Обрабатываем коллекции внутри клонированной строки
+          TemplateProcessor.process_collection_blocks(clone, merged_context, ns, @error_behavior)
+          # 2. Обрабатываем условия
           TemplateProcessor.process_conditionals_in_block(clone, merged_context, ns, @error_behavior)
-          
-          # Подставляем значения
+          # 3. Подставляем значения
           TemplateProcessor.substitute_in_block(clone, merged_context, ns, @error_behavior)
-          
+
           # Вставляем клон после оригинала
           original_row.add_next_sibling(clone)
         end
@@ -146,4 +148,4 @@ module DocumentGenerator
     end
   end
 end
-# v2609161159
+# v2609231538

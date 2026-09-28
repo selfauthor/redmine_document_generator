@@ -64,12 +64,14 @@ module DocumentGenerator
       render_context = context.merge(context['records'].first || {})
       # Обрабатываем все абзацы и строки таблиц
       doc.xpath('//w:p | //w:tr', ns).each do |block_node|
-        # Пропускаем строки таблиц, которые уже обработаны как BEGIN_ROW
         next if block_node.name == 'tr' && @parser_config[:blocks][:row] &&
                 block_node.xpath('.//w:t', ns).map(&:text).join.include?('BEGIN_ROW')
-        # Обрабатываем условия
+        
+        # 1. Обрабатываем коллекции (подзадачи, наблюдатели, связи)
+        TemplateProcessor.process_collection_blocks(block_node, render_context, ns, @error_behavior)
+        # 2. Обрабатываем условия
         TemplateProcessor.process_conditionals_in_block(block_node, render_context, ns, @error_behavior)
-        # Подставляем значения
+        # 3. Подставляем значения
         TemplateProcessor.substitute_in_block(block_node, render_context, ns, @error_behavior)
       end
     end
@@ -129,14 +131,18 @@ module DocumentGenerator
         # Для каждой записи создаем клон
         records.each_with_index do |record, record_idx|
           merged_context = context.merge(record)
-          template_nodes.each_with_index do |template_node, node_idx|
-            # Клонируем узел
-            clone = template_node.dup
-            # Обрабатываем условия в клоне
+          
+          # СНАЧАЛА клонируем ВСЕ template_nodes для текущей записи
+          clones = template_nodes.map(&:dup)
+          
+          # ЗАТЕМ обрабатываем коллекции для ВСЕХ клонов вместе
+          # (чтобы метод видел BEGIN и END в разных узлах)
+          clones = TemplateProcessor.process_collection_blocks(clones, merged_context, ns, @error_behavior)
+          
+          # И ТОЛЬКО ПОТОМ обрабатываем условия и подставляем значения для каждого клона
+          clones.each do |clone|
             TemplateProcessor.process_conditionals_in_block(clone, merged_context, ns, @error_behavior)
-            # Подставляем значения
             TemplateProcessor.substitute_in_block(clone, merged_context, ns, @error_behavior)
-            # Добавляем клон в документ
             parent.add_child(clone)
           end
         end
@@ -145,18 +151,6 @@ module DocumentGenerator
         raise DocumentGenerator::TemplateError, error_msg
       end
     end
-
-    # Очистка текстовых узлов от управляющих маркеров
-    #
-    # @param node [Nokogiri::XML::Node] XML-узел
-    # @param ns [Hash] Пространства имен XML
-    #def clean_node_text(node, ns)
-    #  node.xpath('.//w:t', ns).each do |text_node|
-    #    text = text_node.text
-    #    cleaned = TemplateProcessor.clean_control_markers(text)
-    #    text_node.content = cleaned
-    #  end
-    #end
 
     # Обработка ошибок
     #
@@ -176,4 +170,4 @@ module DocumentGenerator
     end
   end
 end
-# v2609231147
+# v2609281141
