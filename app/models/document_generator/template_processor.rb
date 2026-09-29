@@ -189,6 +189,9 @@ module DocumentGenerator
             # Создаем новый <w:t> с объединённым текстом
             new_text_node = Nokogiri::XML::Node.new('w:t', parent_node.document)
             new_text_node.content = full_marker
+
+            # Сохраняем граничные пробелы, если они присутствуют в объединённом тексте.
+            new_text_node['xml:space'] = 'preserve' if full_marker.match?(/\A\s|\s\z/)
             
             # Добавляем <w:t> в новый <w:r>
             new_run.add_child(new_text_node)
@@ -226,6 +229,8 @@ module DocumentGenerator
               
               new_text = Nokogiri::XML::Node.new('w:t', parent_node.document)
               new_text.content = part
+              # Сохраняем пробелы в начале и конце узла, чтобы Word не удалял их при отображении.
+              new_text['xml:space'] = 'preserve' if part.match?(/\A\s|\s\z/)
               new_run.add_child(new_text)
               
               new_run
@@ -270,6 +275,25 @@ module DocumentGenerator
                 else
                   context[key]
                 end
+        # === ВРЕМЕННАЯ ОТЛАДКА: НАЧАЛО ===
+        # Проверяем наличие ключа и значение на каждом этапе разрешения поля.
+        if key.start_with?('Subtask.')
+          parts = key.split('.')
+          parent_context = context
+          parts[0...-1].each do |part|
+            parent_context = parent_context.is_a?(Hash) ? parent_context[part] : nil
+          end
+
+          Rails.logger.warn(
+            "[DocumentGenerator][DEBUG] " \
+            "Marker=#{key.inspect}; " \
+            "ParentContextClass=#{parent_context.class}; " \
+            "FieldExists=#{parent_context.is_a?(Hash) && parent_context.key?(parts.last)}; " \
+            "FieldValue=#{parent_context.is_a?(Hash) ? parent_context[parts.last].inspect : 'N/A'}; " \
+            "ErrorBehavior=#{error_behavior.inspect}"
+          )
+        end
+        # === ВРЕМЕННАЯ ОТЛАДКА: КОНЕЦ ===
         if value.nil? || value.to_s.strip.empty?
           if error_behavior == 'abort'
             raise TemplateError, I18n.t('document_generator.error_field_not_found', field: key)
@@ -475,7 +499,16 @@ module DocumentGenerator
         original = text_node.text
         cleaned = clean_control_markers(original)
         substituted = substitute_markers(cleaned, context, error_behavior)
-        text_node.content = substituted if original != substituted
+        if original != substituted
+          text_node.content = substituted
+
+          # Сохраняем пробелы в начале и конце текстового узла по правилам WordprocessingML.
+          if substituted.match?(/\A\s|\s\z/)
+            text_node['xml:space'] = 'preserve'
+          else
+            text_node.remove_attribute('xml:space')
+          end
+        end
       end
     end
 
@@ -601,6 +634,10 @@ module DocumentGenerator
     # @param error_behavior [String] Поведение при ошибках ('abort', 'skip_field', 'skip_record')
     # @return [Array<Nokogiri::XML::Node>] Массив узлов с развернутыми коллекциями
     def self.process_collection_blocks(block_nodes, context, ns, error_behavior)
+      # Приводим одиночный XML-узел к массиву, поскольку далее
+      # метод использует индексный поиск и обработку коллекции узлов.
+      block_nodes = [block_nodes] unless block_nodes.is_a?(Array)
+
       collections_config = {
         'SUBTASKS' => { context_key: 'subtasks', item_prefix: 'Subtask' },
         'WATCHERS' => { context_key: 'watchers', item_prefix: 'Watcher' },
@@ -690,4 +727,4 @@ module DocumentGenerator
 
   end
 end
-# v2609281204
+# v2609291044

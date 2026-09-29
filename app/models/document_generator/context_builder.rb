@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-# v2609111508
 module DocumentGenerator
   # Класс отвечает за подготовку структурированных данных (контекста) 
   # из массива записей для последующей передачи в рендереры (Word/Excel).
@@ -162,12 +161,25 @@ module DocumentGenerator
         hash[cfv.custom_field.name] = self.class.format_value(val)
       end
 
-      hash['subtasks'] = Issue.where(parent_id: issue.id).includes(:status, :assigned_to).map do |child|
-        {
+
+      # Формируем контекст подзадач, включая стандартные и пользовательские поля.
+      hash['subtasks'] = Issue.where(parent_id: issue.id)
+                              .includes(:status, :assigned_to, custom_values: :custom_field)
+                              .map do |child|
+        # Создаём хэш стандартных полей подзадачи.
+        subtask_hash = {
           'ID' => child.id,
           I18n.t('field_subject', default: 'Subject') => child.subject,
           I18n.t('field_status', default: 'Status') => child.status&.name
         }
+
+        # Добавляем пользовательские поля подзадачи по их отображаемым названиям.
+        child.custom_field_values.each do |cfv|
+          val = cfv.value.is_a?(Array) ? cfv.value.join(', ') : cfv.value
+          subtask_hash[cfv.custom_field.name] = self.class.format_value(val)
+        end
+
+        subtask_hash
       end
 
       hash['relations'] = issue.relations.map do |rel|
@@ -276,3 +288,4 @@ module DocumentGenerator
     end
   end
 end
+# v2609290848
