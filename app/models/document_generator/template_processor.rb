@@ -258,51 +258,120 @@ module DocumentGenerator
     # ==========================================================================
     # ПОДСТАНОВКА ЗНАЧЕНИЙ (общая логика для Word и Excel)
     # ==========================================================================
-    # Подставляет значения из контекста в текст, заменяя маркеры вида <%...%>
+    # Подставляет значения в маркеры шаблона и обрабатывает отсутствующие поля.
     #
-    # @param text [String] Исходный текст с маркерами
-    # @param context [Hash] Данные для подстановки
-    # @param error_behavior [String] Поведение при ошибках ('abort', 'skip_field', 'skip_record')
-    # @return [String] Текст с подставленными значениями
-    # @raise [TemplateError] если error_behavior='abort' и поле не найдено
+    # @param text [String] Текст, содержащий маркеры.
+    # @param context [Hash] Контекст текущей записи или подзадачи.
+    # @param error_behavior [String] Выбранная стратегия обработки ошибок.
+    # @return [String] Текст с подставленными значениями.
+    # @raise [DocumentGenerator::RenderError] При отсутствии поля в режиме abort.
+    # @raise [DocumentGenerator::SkipRecordError] При пропуске записи.
     def self.substitute_markers(text, context, error_behavior = 'abort')
       return text unless text.is_a?(String)
-      text.gsub(/<%\s*(.*?)\s*%>/) do |match|
-        key = $1.strip
-        value = if key.include?('.')
-                  parts = key.split('.')
-                  parts.inject(context) { |h, k| h.is_a?(Hash) ? h[k] : nil }
-                else
-                  context[key]
-                end
-        # === ВРЕМЕННАЯ ОТЛАДКА: НАЧАЛО ===
-        # Проверяем наличие ключа и значение на каждом этапе разрешения поля.
-        if key.start_with?('Subtask.')
-          parts = key.split('.')
-          parent_context = context
-          parts[0...-1].each do |part|
-            parent_context = parent_context.is_a?(Hash) ? parent_context[part] : nil
+
+      text.gsub(/<%\s*(.*?)\s*%>/) do
+        key = Regexp.last_match(1).strip
+        parts = key.split('.')
+
+        # Последовательно ищем вложенный контекст поля.
+        parent = parts[0...-1].inject(context) do |memo, part|
+          memo.is_a?(Hash) ? memo[part] : nil
+        end
+
+        field_key = parts.last
+        field_exists =
+          if parts.length == 1
+            context.is_a?(Hash) && context.key?(field_key)
+          else
+            parent.is_a?(Hash) && parent.key?(field_key)
           end
 
-          Rails.logger.warn(
-            "[DocumentGenerator][DEBUG] " \
-            "Marker=#{key.inspect}; " \
-            "ParentContextClass=#{parent_context.class}; " \
-            "FieldExists=#{parent_context.is_a?(Hash) && parent_context.key?(parts.last)}; " \
-            "FieldValue=#{parent_context.is_a?(Hash) ? parent_context[parts.last].inspect : 'N/A'}; " \
-            "ErrorBehavior=#{error_behavior.inspect}"
-          )
-        end
-        # === ВРЕМЕННАЯ ОТЛАДКА: КОНЕЦ ===
-        if value.nil? || value.to_s.strip.empty?
-          if error_behavior == 'abort'
-            raise TemplateError, I18n.t('document_generator.error_field_not_found', field: key)
-          else
-            ""
+        value =
+          if field_exists
+            parts.length == 1 ? context[field_key] : parent[field_key]
           end
-        else
-          value.to_s
+
+        # Существующее пустое поле не является ошибкой.
+        next '' if field_exists && (value.nil? || value.to_s.strip.empty?)
+
+        unless field_exists
+          # Получаем сведения о задаче для формирования сообщения.
+
+          # Для вложенного поля используем объект текущей подзадачи или элемента коллекции.
+          # Если вложенного объекта нет, сохраняем привязку к основной задаче.
+          issue =
+            if parts.length > 1 && parent.is_a?(Hash)
+              parent['__issue'] || context['__issue']
+            else
+              context['__issue']
+            end
+
+          issue_label =
+            if issue.respond_to?(:id)
+              "##{issue.id} — #{issue.subject}"
+            elsif issue.is_a?(Hash)
+              "##{issue['id']} — #{issue['subject']}"
+            else
+              I18n.t('document_generator.unknown_record')
+            end
+
+          # Формируем локализованное сообщение об отсутствующем поле.
+          message = I18n.t(
+            'document_generator.error_field_missing',
+            issue: issue_label,
+            field: key
+          )
+
+          case error_behavior
+          when 'abort'
+            # Прерываем выгрузку с локализованным сообщением об ошибке.
+            raise DocumentGenerator::RenderError, message
+
+          when 'skip_field'
+            # Формируем предупреждение и сохраняем его для отображения на странице.
+            warning = I18n.t(
+              'document_generator.warning_field_missing',
+              issue: issue_label,
+              field: key
+            )
+
+            warnings = context['__warnings']
+            warnings << warning if warnings.is_a?(Array)
+
+            # Записываем диагностическую информацию на английском языке.
+            Rails.logger.warn(
+              "[DocumentGenerator] Missing template field '#{key}' in issue #{issue&.id || 'unknown'}; field skipped."
+            )
+
+            # Заменяем отсутствующее поле пустой строкой.
+            next ''
+
+          when 'skip_record'
+            # Формируем предупреждение о пропуске всей записи.
+            warning = I18n.t(
+              'document_generator.warning_record_skipped',
+              issue: issue_label,
+              field: key
+            )
+
+            warnings = context['__warnings']
+            warnings << warning if warnings.is_a?(Array)
+
+            # Записываем диагностическую информацию на английском языке.
+            Rails.logger.warn(
+              "[DocumentGenerator] Missing template field '#{key}' in issue #{issue&.id || 'unknown'}; record will be skipped."
+            )
+
+            # Передаём исключение обработчику пропуска записи.
+            raise DocumentGenerator::SkipRecordError, warning
+
+          else
+            # Неизвестный режим обработки считается ошибкой шаблона.
+            raise DocumentGenerator::RenderError, message
+          end
         end
+
+        value.to_s
       end
     end
 
@@ -625,106 +694,258 @@ module DocumentGenerator
     # ==========================================================================
     # ОБРАБОТКА КОЛЛЕКЦИЙ (ПОДЗАДАЧИ, НАБЛЮДАТЕЛИ, СВЯЗИ)
     # ==========================================================================
-    # Унифицированный метод для Word и Excel. Разворачивает блоки BEGIN_.../END_...
-    # Принимает массив узлов и работает с ним как с единым целым (аналогично process_row_blocks).
+    # Разворачивает блоки коллекций подзадач, наблюдателей и связей.
+    # Поддерживает маркеры в одном или нескольких XML-узлах,
+    # в том числе когда содержимое блока находится в абзаце
+    # с BEGIN-маркером или END-маркером.
     #
-    # @param block_nodes [Array<Nokogiri::XML::Node>] Массив XML-узлов (абзацы, строки таблиц)
-    # @param context [Hash] Контекст данных
-    # @param ns [Hash] Пространства имен XML
-    # @param error_behavior [String] Поведение при ошибках ('abort', 'skip_field', 'skip_record')
-    # @return [Array<Nokogiri::XML::Node>] Массив узлов с развернутыми коллекциями
+    # @param block_nodes [Array<Nokogiri::XML::Node>] XML-узлы шаблона
+    # @param context [Hash] Контекст текущей задачи
+    # @param ns [Hash] Пространства имён XML
+    # @param error_behavior [String] Режим обработки ошибок:
+    #   'abort', 'skip_field' или 'skip_record'
+    # @return [Array<Nokogiri::XML::Node>] Узлы с обработанными коллекциями
     def self.process_collection_blocks(block_nodes, context, ns, error_behavior)
-      # Приводим одиночный XML-узел к массиву, поскольку далее
-      # метод использует индексный поиск и обработку коллекции узлов.
+      # Приводим одиночный узел к массиву для единого алгоритма обработки.
       block_nodes = [block_nodes] unless block_nodes.is_a?(Array)
 
+      # Описываем доступные коллекции и соответствующие им префиксы полей.
       collections_config = {
         'SUBTASKS' => { context_key: 'subtasks', item_prefix: 'Subtask' },
         'WATCHERS' => { context_key: 'watchers', item_prefix: 'Watcher' },
         'RELATIONS' => { context_key: 'relations', item_prefix: 'Relation' }
       }
 
+      # Выбираем XPath в зависимости от формата документа.
       is_word = ns.key?('w')
       text_xpath = is_word ? './/w:t' : './/xmlns:t | .//xmlns:v'
 
       collections_config.each do |marker_base, config|
-        begin_marker = "<%BEGIN_#{marker_base}%>"
-        end_marker = "<%END_#{marker_base}%>"
+        # Формируем регулярные выражения для управляющих маркеров.
+        begin_regex = /<%\s*BEGIN_#{Regexp.escape(marker_base)}\s*%>/i
+        end_regex = /<%\s*END_#{Regexp.escape(marker_base)}\s*%>/i
 
-        # Ищем begin и end блоки в пределах ВСЕХ узлов (как в process_row_blocks)
-        begin_idx = block_nodes.index { |b| b.xpath(text_xpath, ns).map(&:text).join.include?(begin_marker) }
-        end_idx = block_nodes.index { |b| b.xpath(text_xpath, ns).map(&:text).join.include?(end_marker) }
+        # Собираем текст каждого XML-узла и общий текст коллекции.
+        # Это позволяет находить маркеры, даже если Word разбил их на runs.
+        node_texts = block_nodes.map do |node|
+          node.xpath(text_xpath, ns).map(&:text).join
+        end
+        full_text = node_texts.join
+
+        begin_match = full_text.match(begin_regex)
+        next unless begin_match
+
+        # Конец ищем только после начала текущего блока.
+        end_match = full_text.match(end_regex, begin_match.end(0))
+        next unless end_match
+
+        # Определяем позиции маркеров относительно исходных XML-узлов.
+        node_ranges = []
+        current_position = 0
+
+        node_texts.each do |node_text|
+          node_ranges << {
+            start: current_position,
+            finish: current_position + node_text.length
+          }
+          current_position += node_text.length
+        end
+
+        begin_idx = node_ranges.index do |range|
+          begin_match.begin(0) >= range[:start] &&
+            begin_match.begin(0) < range[:finish]
+        end
+
+        end_idx = node_ranges.index do |range|
+          end_match.begin(0) >= range[:start] &&
+            end_match.begin(0) < range[:finish]
+        end
 
         next unless begin_idx && end_idx
 
+        # Получаем данные коллекции текущей задачи.
+        collection_data = context[config[:context_key]] || []
+
+        # Если оба маркера расположены в одном XML-узле,
+        # обрабатываем блок как обычную строковую коллекцию.
         if begin_idx == end_idx
-          # Случай 1: Маркеры находятся внутри одного блока (ячейки или абзаца)
           block = block_nodes[begin_idx]
-          block_text = block.xpath(text_xpath, ns).map(&:text).join
-          regex = /<%\s*BEGIN_#{marker_base}\s*%>(.*?)<%\s*END_#{marker_base}\s*%>/im
-          
-          new_block_text = block_text.gsub(regex) do |match|
-            inner_template = $1.strip
-            collection_data = context[config[:context_key]] || []
-            
-            if collection_data.empty?
-              "" # Блок просто не выводится, если коллекция пуста
-            else
-              expanded_items = collection_data.map do |item|
-                item_context = context.merge(config[:item_prefix] => item)
+          block_text = node_texts[begin_idx]
+
+          collection_regex =
+            /<%\s*BEGIN_#{Regexp.escape(marker_base)}\s*%>(.*?)<%\s*END_#{Regexp.escape(marker_base)}\s*%>/im
+
+          new_block_text = block_text.gsub(collection_regex) do
+            inner_template = Regexp.last_match(1)
+
+            collection_data.map do |item|
+              # Создаём отдельный контекст для текущего элемента коллекции.
+              item_context = context.merge(config[:item_prefix] => item)
+
+              begin
+                # Подставляем поля текущего элемента.
                 substitute_markers(inner_template, item_context, error_behavior)
+              rescue DocumentGenerator::SkipRecordError => e
+                # Пропускаем только текущий элемент коллекции, не затрагивая родительскую задачу.
+                item_issue = item.is_a?(Hash) ? item['__issue'] : nil
+
+                Rails.logger.warn(
+                  "[DocumentGenerator] Collection item was skipped; issue ##{item_issue&.id || 'unknown'}."
+                )
+
+                ''
               end
-              expanded_items.join("\n")
-            end
+            end.join("\n")
           end
-          
-          # Очищаем старые текстовые узлы и записываем развернутый текст в первый
-          block.xpath(text_xpath, ns).each { |n| n.content = '' }
-          first_text_node = block.xpath(text_xpath, ns).first
-          first_text_node.content = new_block_text if first_text_node
-          
-        elsif end_idx > begin_idx
-          # Случай 2: Маркеры в разных блоках (клонируем целые строки/абзацы)
-          template_blocks = block_nodes[(begin_idx + 1)...end_idx]
-          
-          # Очищаем маркеры из граничных блоков
-          begin_block = block_nodes[begin_idx]
-          end_block = block_nodes[end_idx]
-          begin_block.xpath(text_xpath, ns).each { |n| n.content = clean_control_markers(n.content) }
-          end_block.xpath(text_xpath, ns).each { |n| n.content = clean_control_markers(n.content) }
-          
-          # Удаляем шаблонные блоки и граничные маркеры из массива
-          block_nodes = block_nodes[0..begin_idx] + block_nodes[(end_idx + 1)..-1]
-          
-          collection_data = context[config[:context_key]] || []
-          
-          if collection_data.empty?
+
+          # Сохраняем результат в первом текстовом узле,
+          # очищая остальные узлы исходного блока.
+          text_nodes = block.xpath(text_xpath, ns)
+          text_nodes.each { |node| node.content = '' }
+          text_nodes.first.content = new_block_text if text_nodes.first
+
+          next
+        end
+
+        # Если конец расположен раньше начала, структура некорректна.
+        if end_idx < begin_idx
+          raise TemplateError,
+                I18n.t('document_generator.error_row_block_mismatch')
+        end
+
+        begin_node = block_nodes[begin_idx]
+        end_node = block_nodes[end_idx]
+
+        begin_range = node_ranges[begin_idx]
+        end_range = node_ranges[end_idx]
+
+        # Обрезает текст клона, оставляя только символы
+        # из указанного диапазона общего текста.
+        trim_node_to_range = lambda do |node, node_start, range_start, range_end|
+          local_position = 0
+          retained_text = +' '
+
+          node.xpath(text_xpath, ns).each do |text_node|
+            original_text = text_node.text
+            text_start = node_start + local_position
+            text_end = text_start + original_text.length
+
+            # Вычисляем пересечение текста узла с требуемым диапазоном.
+            keep_start = [text_start, range_start].max
+            keep_end = [text_end, range_end].min
+
+            if keep_end > keep_start
+              fragment = original_text[
+                (keep_start - text_start)...(keep_end - text_start)
+              ] || ''
+            else
+              fragment = ''
+            end
+
+            text_node.content = fragment
+            retained_text << fragment
+            local_position += original_text.length
+          end
+
+          retained_text.strip
+        end
+
+        # Сохраняем текст перед BEGIN_SUBTASKS,
+        # если он находится в том же абзаце.
+        prefix_node = begin_node.dup
+        prefix_text = trim_node_to_range.call(
+          prefix_node,
+          begin_range[:start],
+          begin_range[:start],
+          begin_match.begin(0)
+        )
+
+        # Сохраняем текст после END_SUBTASKS,
+        # если он находится в том же абзаце.
+        suffix_node = end_node.dup
+        suffix_text = trim_node_to_range.call(
+          suffix_node,
+          end_range[:start],
+          end_match.end(0),
+          end_range[:finish]
+        )
+
+        prefix_nodes = prefix_text.empty? ? [] : [prefix_node]
+        suffix_nodes = suffix_text.empty? ? [] : [suffix_node]
+
+        # Формируем XML-узлы для каждого элемента коллекции.
+        expanded_blocks = []
+
+        collection_data.each do |item|
+          # Вложенный контекст содержит поля основной задачи и текущего элемента коллекции.
+          item_context = context.merge(config[:item_prefix] => item)
+
+          # Сначала собираем узлы текущего элемента отдельно, чтобы при ошибке
+          # не добавить в документ частично обработанную подзадачу.
+          item_blocks = []
+
+          begin
+            (begin_idx..end_idx).each do |node_idx|
+              template_node = block_nodes[node_idx]
+              original_range = node_ranges[node_idx]
+
+              # Клонируем узел, сохраняя его исходное форматирование.
+              clone = template_node.dup
+
+              # Оставляем только текст между BEGIN и END.
+              retained_text = trim_node_to_range.call(
+                clone,
+                original_range[:start],
+                begin_match.end(0),
+                end_match.begin(0)
+              )
+
+              # Не добавляем пустые граничные абзацы.
+              if (node_idx == begin_idx || node_idx == end_idx) &&
+                 retained_text.empty?
+                next
+              end
+
+              # Обрабатываем условия и поля в контексте текущего элемента.
+              process_conditionals_in_block(
+                clone, item_context, ns, error_behavior
+              )
+
+              substitute_in_block(
+                clone, item_context, ns, error_behavior
+              )
+
+              item_blocks << clone
+            end
+
+            # Добавляем обработанные узлы только после успешной обработки всего элемента.
+            expanded_blocks.concat(item_blocks)
+          rescue DocumentGenerator::SkipRecordError => e
+            # Исключение относится к текущему элементу коллекции.
+            # Остальные элементы и родительская задача продолжают обрабатываться.
+            item_issue = item.is_a?(Hash) ? item['__issue'] : nil
+
+            Rails.logger.warn(
+              "[DocumentGenerator] Collection item was skipped; issue ##{item_issue&.id || 'unknown'}."
+            )
+
             next
           end
-          
-          # Разворачиваем коллекцию
-          expanded_blocks = []
-          collection_data.each do |item|
-            item_context = context.merge(config[:item_prefix] => item)
-            template_blocks.each do |tmpl_block|
-              clone = tmpl_block.dup
-              # ВАЖНО: Вызываем process_conditionals_in_block и substitute_in_block ЗДЕСЬ,
-              # потому что только здесь доступен правильный item_context с ключом Subtask/Watcher/Relation
-              process_conditionals_in_block(clone, item_context, ns, error_behavior)
-              substitute_in_block(clone, item_context, ns, error_behavior)
-              expanded_blocks << clone
-            end
-          end
-          
-          # Вставляем развернутые блоки после begin
-          insert_idx = begin_idx + 1
-          block_nodes = block_nodes[0...insert_idx] + expanded_blocks + block_nodes[insert_idx..-1]
         end
+
+        # Заменяем исходный блок его внешним текстом
+        # и сформированными элементами коллекции.
+        block_nodes =
+          block_nodes[0...begin_idx] +
+          prefix_nodes +
+          expanded_blocks +
+          suffix_nodes +
+          Array(block_nodes[(end_idx + 1)..-1])
       end
-      
+
       block_nodes
     end
 
   end
 end
-# v2609291044
+# v2609301238

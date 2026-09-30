@@ -8,6 +8,10 @@ module DocumentGenerator
   # Обрабатывает группировку, агрегатные функции, циклы по строкам.
   
   class ExcelRenderer
+    # Возвращает предупреждения, накопленные при формировании документа.
+    # @return [Array<String>] Список предупреждений для пользователя.
+    attr_reader :warnings
+
     # Инициализация рендерера
     #
     # @param template_path [String] Путь к файлу шаблона
@@ -19,6 +23,9 @@ module DocumentGenerator
       @issues = issues
       @parser_config = parser_config
       @error_behavior = error_behavior
+
+      # Создаём массив для предупреждений текущей выгрузки.
+      @warnings = []
     end
 
     # Генерация документа
@@ -28,6 +35,9 @@ module DocumentGenerator
     def render
       # Строим контекст данных
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
+
+      # Используем общий массив предупреждений ContextBuilder и ExcelRenderer.
+      @warnings = context['__warnings'] || @warnings
       
       # Путь для выходного файла
       output_path = "#{@template_path}.output.xlsx"
@@ -148,4 +158,4 @@ module DocumentGenerator
     end
   end
 end
-# v2609231538
+# v2609301231

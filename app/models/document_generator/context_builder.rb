@@ -12,6 +12,8 @@ module DocumentGenerator
       @parser_config = parser_config
       @error_behavior = error_behavior
       @template_text = @parser_config[:template_text] || ''
+      # Общий массив предупреждений для всех обрабатываемых записей.
+      @warnings = []
     end
 
     # Основной метод: возвращает готовый хэш данных
@@ -59,7 +61,8 @@ module DocumentGenerator
         'totals' => [{ 'total_count' => records.size }.merge(calculate_aggregates(@issues, 'total_'))],
         'ExportDate' => Time.now.strftime('%d.%m.%Y %H:%M'),
         'ExportUser' => User.current.name,
-        'ProjectName' => @issues.first&.project&.name || ''
+        'ProjectName' => @issues.first&.project&.name || '',
+        '__warnings' => @warnings
       }
     end
 
@@ -112,12 +115,18 @@ module DocumentGenerator
         'totals' => [{ 'total_count' => total_count }.merge(calculate_aggregates(@issues, 'total_'))],
         'ExportDate' => Time.now.strftime('%d.%m.%Y %H:%M'),
         'ExportUser' => User.current.name,
-        'ProjectName' => @issues.first&.project&.name || ''
+        'ProjectName' => @issues.first&.project&.name || '',
+        '__warnings' => @warnings
       }
     end
 
     def build_issue_hash(issue)
       hash = {}
+      # Сохраняем задачу, чтобы сообщения об ошибках содержали её ID и тему.
+      hash['__issue'] = issue
+
+      # Все записи используют единый массив предупреждений.
+      hash['__warnings'] = @warnings
       
       standard_fields_map = {
         'id' => issue.id,
@@ -166,8 +175,9 @@ module DocumentGenerator
       hash['subtasks'] = Issue.where(parent_id: issue.id)
                               .includes(:status, :assigned_to, custom_values: :custom_field)
                               .map do |child|
-        # Создаём хэш стандартных полей подзадачи.
+        # Сохраняем объект подзадачи, чтобы ошибки её полей ссылались на правильную запись.
         subtask_hash = {
+          '__issue' => child,
           'ID' => child.id,
           I18n.t('field_subject', default: 'Subject') => child.subject,
           I18n.t('field_status', default: 'Status') => child.status&.name
@@ -288,4 +298,4 @@ module DocumentGenerator
     end
   end
 end
-# v2609290848
+# v2609301233

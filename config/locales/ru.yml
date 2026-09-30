@@ -38,8 +38,12 @@ ru:
     error_word_render_failed: "Сбой рендеринга Word: %{message}"
     error_row_template_missing: "В шаблоне Excel не найден маркер ROW в первой ячейке строки"
     error_field_not_found: "Поле '%{field}' не найдено или пусто"
-    error_condition_evaluation: "Ошибка при вычислении условия '%{condition}': %{message}"
+    error_field_missing: "В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне."
+    unknown_record: "неизвестная запись"
+    error_condition_evaluation: "Ошибка при вычислении условия «%{condition}»: %{message}"
     error_missing_end_marker: "Не найден закрывающий маркер <%END%> для условия IF(%{condition})"
+    warning_field_missing: 'В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне. Поле пропущено.'
+    warning_record_skipped: 'В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне. Запись пропущена.'
     
     # Вспомогательные строки
     relation_type: "Тип связи"

@@ -38,8 +38,14 @@ en:
     error_word_render_failed: "Word rendering failed: %{message}"
     error_row_template_missing: "ROW marker not found in the first cell of the Excel template"
     error_field_not_found: "Field '%{field}' not found or empty"
+    error_field_missing: "Task %{issue}: field '%{field}' specified in the template was not found."
+
+    unknown_record: "unknown record"
+
     error_condition_evaluation: "Error evaluating condition '%{condition}': %{message}"
     error_missing_end_marker: "Missing closing marker <%END%> for condition IF(%{condition})"
+    warning_field_missing: 'Field "%{field}" specified in the template was not found in issue %{issue}. The field was skipped.'
+    warning_record_skipped: 'Field "%{field}" specified in the template was not found in issue %{issue}. The record was skipped.'
     
     # Helper strings
     relation_type: "Relation Type"

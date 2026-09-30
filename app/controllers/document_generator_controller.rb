@@ -50,30 +50,32 @@ class DocumentGeneratorController < ApplicationController
     end
   end
 
+
   # POST /projects/:project_id/document_generator/export
-  # Основной метод генерации и скачивания документа
+  # Генерирует документ и возвращает файл либо структурированную ошибку.
   def export
     @template_file = params[:template_file]
     @export_mode = params[:export_mode]
     @file_name = params[:file_name]
     @error_behavior = params[:error_behavior]
+    @render_warnings = []
 
+    # Проверяем имя файла до запуска генерации.
     if @file_name =~ %r{[/:*?"<>|]}
-      flash[:error] = I18n.t('document_generator.error_invalid_filename')
-      redirect_back(fallback_location: project_issues_path(@project)) and return
+      return render_export_error(I18n.t('document_generator.error_invalid_filename'))
     end
 
+    # Проверяем наличие шаблона и допустимость его расширения.
     unless @template_file && valid_template_extension?(@template_file.original_filename)
-      flash[:error] = I18n.t('document_generator.error_invalid_format')
-      redirect_back(fallback_location: project_issues_path(@project)) and return
+      return render_export_error(I18n.t('document_generator.error_invalid_format'))
     end
 
+    # Получаем задачи, выбранные текущими параметрами фильтра.
     data_provider = DocumentGenerator::DataProvider.new(@project, User.current, params)
     @issues = data_provider.fetch_issues
 
     if @issues.empty?
-      flash[:error] = I18n.t('document_generator.error_no_records')
-      redirect_back(fallback_location: project_issues_path(@project)) and return
+      return render_export_error(I18n.t('document_generator.error_no_records'))
     end
 
     temp_template_path = save_uploaded_template(@template_file)
@@ -83,33 +85,50 @@ class DocumentGeneratorController < ApplicationController
       config = parser.parse
 
       if @export_mode == 'single'
+        # В режиме отдельных файлов собираем предупреждения от всех renderer.
         archive_path = generate_single_mode_archive(temp_template_path, config)
-        send_file archive_path,
-                  filename: "#{@file_name}.zip",
-                  type: 'application/zip',
-                  disposition: 'attachment'
+        ext = '.zip'
+        output_path = archive_path
       else
         output_path = generate_combined_document(temp_template_path, config)
         ext = File.extname(temp_template_path)
-        send_file output_path,
-                  filename: "#{@file_name}#{ext}",
-                  type: mime_type_for(ext),
-                  disposition: 'attachment'
       end
 
+      # Передаём предупреждения в URL-кодированном JSON-заголовке.
+      # URL-кодирование позволяет безопасно передавать Unicode и спецсимволы в HTTP-заголовке.
+      if @render_warnings.any?
+        response.headers['X-DG-Warnings'] = ERB::Util.url_encode(@render_warnings.to_json)
+      end
+
+      # Отправляем сформированный файл браузеру.
+      send_file output_path,
+                filename: "#{@file_name}#{ext}",
+                type: ext == '.zip' ? 'application/zip' : mime_type_for(ext),
+                disposition: 'attachment'
+
     rescue DocumentGenerator::TemplateError, DocumentGenerator::RenderError => e
-      flash[:error] = e.message
-      redirect_back(fallback_location: project_issues_path(@project))
+      render_export_error(e.message)
     rescue StandardError => e
+      Rails.logger.error "[DocumentGenerator] Export failed: #{e.message}\n#{e.backtrace&.join("\n")}"
       short_msg = e.message.to_s.truncate(200)
-      flash[:error] = I18n.t('document_generator.error_render_failed', message: short_msg)
-      redirect_back(fallback_location: project_issues_path(@project))
+      render_export_error(I18n.t('document_generator.error_render_failed', message: short_msg))
     ensure
+      # Удаляем временный файл шаблона независимо от результата генерации.
       FileUtils.rm_f(temp_template_path) if temp_template_path && File.exist?(temp_template_path)
     end
   end
 
   private
+
+  # Возвращает ошибку экспорта в JSON-формате для единого JavaScript-обработчика.
+  # @param message [String] Текст ошибки, который нужно показать пользователю.
+  # @return [void]
+  def render_export_error(message)
+    render json: {
+      type: 'error',
+      message: message
+    }, status: :unprocessable_entity
+  end
 
   def find_project
     @project = Project.find(params[:project_id])
@@ -123,10 +142,22 @@ class DocumentGeneratorController < ApplicationController
     deny_access
   end
 
+  # Проверяет наличие библиотек, необходимых для генерации документов.
+  # При AJAX-запросе возвращает ошибку в JSON, при обычном запросе использует redirect.
   def check_gems_loaded
     return if defined?(DOCUMENT_GENERATOR_GEMS_LOADED) && DOCUMENT_GENERATOR_GEMS_LOADED
-    flash[:error] = I18n.t('document_generator.error_gems_not_loaded')
-    redirect_to project_issues_path(@project)
+
+    message = I18n.t('document_generator.error_gems_not_loaded')
+
+    if request.xhr?
+      render json: {
+        type: 'error',
+        message: message
+      }, status: :unprocessable_entity
+    else
+      flash[:error] = message
+      redirect_to project_issues_path(@project)
+    end
   end
 
   def save_uploaded_template(uploaded_file)
@@ -136,9 +167,17 @@ class DocumentGeneratorController < ApplicationController
     temp_path
   end
 
+
+  # Генерирует один документ для всего набора задач и сохраняет предупреждения renderer.
+  # @param template_path [String] Путь к временному файлу шаблона.
+  # @param config [Hash] Конфигурация, полученная из парсера шаблона.
+  # @return [String] Путь к сформированному документу.
   def generate_combined_document(template_path, config)
     renderer = create_renderer(template_path, @issues, config)
     result = renderer.render
+
+    # Сохраняем предупреждения для передачи в HTTP-ответе метода export.
+    @render_warnings.concat(renderer.warnings || [])
 
     if result.is_a?(String) && File.exist?(result)
       result
@@ -159,6 +198,9 @@ class DocumentGeneratorController < ApplicationController
       @issues.each do |issue|
         renderer = create_renderer(template_path, [issue], config)
         result = renderer.render
+
+        # Накапливаем предупреждения по каждой задаче, вошедшей в архив.
+        @render_warnings.concat(renderer.warnings || [])
 
         if result.is_a?(String) && File.exist?(result)
           file_path = result
@@ -204,4 +246,4 @@ class DocumentGeneratorController < ApplicationController
     %w[.docx .xlsx].include?(ext)
   end
 end
-# v2609151530
+# v2609300947

@@ -7,6 +7,10 @@ module DocumentGenerator
   # Класс отвечает за генерацию Word-документов (.docx) из шаблонов.
   # Обрабатывает циклы, условия, подстановку полей с сохранением форматирования.
   class WordRenderer
+    # Возвращает предупреждения, накопленные при формировании документа.
+    # @return [Array<String>] Список предупреждений для пользователя.
+    attr_reader :warnings
+
     # Инициализация рендерера
     #
     # @param template_path [String] Путь к файлу шаблона
@@ -18,6 +22,9 @@ module DocumentGenerator
       @issues = issues
       @parser_config = parser_config
       @error_behavior = error_behavior
+
+      # Создаём массив для предупреждений текущей выгрузки.
+      @warnings = []
     end
 
     # Генерация документа
@@ -27,6 +34,10 @@ module DocumentGenerator
     def render
       # Строим контекст данных
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
+
+      # Используем тот же массив предупреждений, который создал ContextBuilder.
+      # Благодаря общей ссылке предупреждения из обработки полей будут доступны renderer.
+      @warnings = context['__warnings'] || @warnings
       # Путь для выходного файла
       output_path = "#{@template_path}.output.docx"
       # Файлы для обработки
@@ -130,20 +141,39 @@ module DocumentGenerator
         
         # Для каждой записи создаем клон
         records.each_with_index do |record, record_idx|
-          merged_context = context.merge(record)
-          
-          # СНАЧАЛА клонируем ВСЕ template_nodes для текущей записи
-          clones = template_nodes.map(&:dup)
-          
-          # ЗАТЕМ обрабатываем коллекции для ВСЕХ клонов вместе
-          # (чтобы метод видел BEGIN и END в разных узлах)
-          clones = TemplateProcessor.process_collection_blocks(clones, merged_context, ns, @error_behavior)
-          
-          # И ТОЛЬКО ПОТОМ обрабатываем условия и подставляем значения для каждого клона
-          clones.each do |clone|
-            TemplateProcessor.process_conditionals_in_block(clone, merged_context, ns, @error_behavior)
-            TemplateProcessor.substitute_in_block(clone, merged_context, ns, @error_behavior)
-            parent.add_child(clone)
+          begin
+            merged_context = context.merge(record)
+
+            # Клонируем исходные XML-узлы для текущей записи.
+            clones = template_nodes.map(&:dup)
+
+            # Разворачиваем вложенные коллекции в контексте этой задачи.
+            clones = TemplateProcessor.process_collection_blocks(
+              clones, merged_context, ns, @error_behavior
+            )
+
+            # Обрабатываем условия и поля в каждом клоне.
+            clones.each do |clone|
+              TemplateProcessor.process_conditionals_in_block(
+                clone, merged_context, ns, @error_behavior
+              )
+
+              TemplateProcessor.substitute_in_block(
+                clone, merged_context, ns, @error_behavior
+              )
+
+              parent.add_child(clone)
+            end
+          rescue DocumentGenerator::SkipRecordError => e
+            # Записываем информацию о пропущенной записи на английском языке.
+            issue = record['__issue']
+
+            Rails.logger.warn(
+              "[DocumentGenerator] Issue ##{issue&.id || 'unknown'} was skipped because a required template field was missing."
+            )
+
+            # Переходим к следующей задаче, не прерывая формирование документа.
+            next
           end
         end
       else
@@ -170,4 +200,4 @@ module DocumentGenerator
     end
   end
 end
-# v2609281141
+# v2609301230
