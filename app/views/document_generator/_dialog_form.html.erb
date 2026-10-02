@@ -38,7 +38,7 @@
   </fieldset>
 
   <fieldset class="box">
-    <legend>Информация</legend>
+    <legend><%= l(:label_document_generator_information) %></legend>
     <p id="dg-records-count" data-count="<%= @record_count %>"><%= l('document_generator.records_count', count: @record_count) %></p>
     <p id="dg-files-count" 
        data-text-single="<%= l('document_generator.single_file') %>" 
@@ -48,8 +48,24 @@
   </fieldset>
 
   <p class="buttons">
-    <%= submit_tag l('document_generator.button_export'), id: 'dg-submit-btn', disabled: true, data: { disable_with: l('document_generator.button_export') } %>
-    <%= link_to l('button_cancel'), '#', onclick: "hideModal(this); return false;" %>
+    <%= submit_tag l('document_generator.button_export'),
+                   id: 'dg-submit-btn',
+                   disabled: true,
+                   data: { disable_with: l('document_generator.button_export') } %>
+
+    <%= link_to l('button_cancel'), '#',
+                onclick: "hideModal(this); return false;" %>
+
+    <span id="dg-download-link-container"
+          class="dg-download-link-container"
+          style="display:none;">
+      <span id="dg-download-link-message">
+        <%= l('document_generator.download_fallback_text') %>
+      </span>
+      <a id="dg-download-link" href="#" target="_blank" rel="noopener">
+        <%= l('document_generator.download_link_text') %>
+      </a>
+    </span>
   </p>
 
   <!-- Скрытые поля для передачи параметров фильтра -->

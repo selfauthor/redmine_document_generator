@@ -3,6 +3,7 @@ ru:
   permission_use_document_generator: "Использовать генератор документов"
   label_document_generator: "Генератор документов"
   error_gems_not_loaded: "Не установлены необходимые библиотеки для генерации документов. Обратитесь к администратору."
+  label_document_generator_information: "Информация"
 
   document_generator:
     dialog_title: "Генератор документов"
@@ -21,6 +22,11 @@ ru:
     single_file: "Будет создан 1 файл"
     button_export: "Выгрузить"
     button_cancel: "Отмена"
+    retention_hours: "Срок хранения сгенерированных файлов (часы)"
+    download_fallback_text: "Если скачивание файла не началось, нажмите на ссылку:"
+    download_link_text: "Скачать файл"
+    settings_retention_hours_info: "Папки с созданными файлами удаляются по истечении указанного количества часов с момента создания. Значение по умолчанию: 24 часа."
+    error_export_not_found: "Запрошенный результат выгрузки не найден или срок его хранения истёк."
     
     # Сообщения об ошибках
     error_invalid_filename: "Имя файла содержит недопустимые символы"

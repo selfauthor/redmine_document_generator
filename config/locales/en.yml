@@ -3,6 +3,7 @@ en:
   permission_use_document_generator: "Use Document Generator"
   label_document_generator: "Document Generator"
   error_gems_not_loaded: "Required libraries for document generation are not installed. Please contact the administrator."
+  label_document_generator_information: "Information"
 
   document_generator:
     dialog_title: "Document Generator"
@@ -21,6 +22,11 @@ en:
     single_file: "1 file will be created"
     button_export: "Export"
     button_cancel: "Cancel"
+    retention_hours: "Generated files retention period (hours)"
+    download_fallback_text: "If the download does not start, click the link:"
+    download_link_text: "Download file"
+    settings_retention_hours_info: "Folders containing generated files are deleted after this number of hours from creation. Default: 24 hours."
+    error_export_not_found: "The requested export was not found or has expired."
     
     # Error messages
     error_invalid_filename: "File name contains invalid characters"

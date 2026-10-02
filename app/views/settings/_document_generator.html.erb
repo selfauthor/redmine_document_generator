@@ -1,0 +1,12 @@
+<%# Настройка срока хранения сгенерированных документов в часах. %>
+<p>
+  <label for="settings_retention_hours">
+    <%= l('document_generator.retention_hours') %>
+  </label>
+  <%= number_field_tag(
+        'settings[retention_hours]',
+        settings['retention_hours'] || '24',
+        min: 1,
+        step: 1
+      ) %>
+</p>

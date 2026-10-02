@@ -2,7 +2,7 @@ var DG = DG || {};
 
 // Проверка имени файла на недопустимые символы: / \ : * ? " < > |
 DG.validateFilename = function(filename) {
-  var invalidChars = /[\/:*?"<>|]/;
+  var invalidChars = /[\\/:*?"<>|]/;
   return !invalidChars.test(filename) && filename.trim().length > 0;
 };
 
@@ -10,7 +10,7 @@ DG.validateFilename = function(filename) {
 // Возвращает true, если файл не выбран (считаем валидным состоянием)
 DG.validateTemplateFile = function(fileInput) {
   if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-    return true; // Файл ещё не выбран — не ошибка
+    return false; // Файл ещё не выбран — не ошибка
   }
   var filename = fileInput.files[0].name.toLowerCase();
   var validExtensions = ['.docx', '.xlsx'];
@@ -24,7 +24,6 @@ DG.updateInfo = function() {
   var recordCountEl = $('#dg-records-count');
   if (!recordCountEl.length) return; // Форма ещё не в DOM
 
-  var recordCount = parseInt(recordCountEl.data('count'), 10) || 0;
   var exportMode = $('input[name="export_mode"]:checked').val();
   var fileName = $('#dg_file_name').val();
   var fileInput = document.getElementById('template_file');
@@ -110,17 +109,23 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
 
-  // Отправляет форму экспорта и обрабатывает файл, ошибку и предупреждения через единый механизм.
+  // Отправляет форму генерации и отображает ссылку на защищённое скачивание.
   $(document).on('submit', '#document-generator-form', async function(event) {
     event.preventDefault();
 
     var form = this;
     var submitButton = form.querySelector('#dg-submit-btn');
+    var $downloadContainer = $('#dg-download-link-container');
+    var $downloadLink = $('#dg-download-link');
 
     // Блокируем повторную отправку формы на время генерации.
     if (submitButton) {
       submitButton.disabled = true;
     }
+
+    // Скрываем ссылку от предыдущего результата, если пользователь запустил генерацию повторно.
+    $downloadContainer.hide();
+    $downloadLink.attr('href', '#');
 
     try {
       // Отправляем форму как multipart/form-data, включая загруженный шаблон.
@@ -129,94 +134,47 @@ document.addEventListener('DOMContentLoaded', function() {
         body: new FormData(form),
         credentials: 'same-origin',
         headers: {
-          'Accept': 'application/json, application/octet-stream',
+          'Accept': 'application/json',
           'X-Requested-With': 'XMLHttpRequest'
         }
       });
 
-      // При ошибке сервер возвращает JSON с полем message.
-      if (!response.ok) {
-        var errorResult;
+      var result;
 
-        try {
-          errorResult = await response.json();
-        } catch (parseError) {
-          errorResult = {};
-        }
+      try {
+        result = await response.json();
+      } catch (parseError) {
+        result = {};
+      }
 
-        var errorMessage = errorResult.message || errorResult.error || 'Document generation failed.';
-
-        // Закрываем модальное окно и показываем ошибку на красном фоне.
-        hideModal(form);
+      // Обрабатываем ошибки генерации, не закрывая модальное окно.
+      if (!response.ok || result.type !== 'success' || !result.download_url) {
+        var errorMessage = result.message || result.error || 'Document generation failed.';
         DG.showExportMessage('error', errorMessage);
         return;
       }
 
-      // Получаем файл из тела успешного ответа.
-      var blob = await response.blob();
+      // Устанавливаем полученную от сервера ссылку для ручного запуска скачивания.
+      $downloadLink.attr('href', result.download_url);
+      $downloadLink.attr('download', result.filename || '');
+      $downloadContainer.show();
 
-      // Получаем имя файла из заголовка Content-Disposition.
-      var contentDisposition = response.headers.get('Content-Disposition') || '';
-      var filename = 'document';
+      // Запускаем скачивание сразу после получения ссылки.
+      // Окно остаётся открытым, чтобы пользователь мог воспользоваться ссылкой повторно.
+      window.location.href = result.download_url;
 
-      // Сначала ищем UTF-8-имя: оно может идти после обычного filename
-      // и содержит исходные символы, включая кириллицу.
-      var utf8FilenameMatch = contentDisposition.match(
-        /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i
-      );
-
-      if (utf8FilenameMatch) {
-        filename = decodeURIComponent(
-          utf8FilenameMatch[1].trim().replace(/^"|"$/g, '')
-        );
-      } else {
-        // Используем обычное имя только при отсутствии UTF-8-варианта.
-        var regularFilenameMatch = contentDisposition.match(
-          /filename\s*=\s*"?([^";]+)"?/i
-        );
-
-        if (regularFilenameMatch) {
-          filename = regularFilenameMatch[1].trim().replace(/^"|"$/g, '');
-        }
+      // Показываем предупреждения генератора, если они были возвращены сервером.
+      if (Array.isArray(result.warnings) && result.warnings.length > 0) {
+        DG.showExportMessage('warning', result.warnings);
       }
-
-      // Создаём временную ссылку и запускаем скачивание сформированного документа.
-      var downloadUrl = window.URL.createObjectURL(blob);
-      var link = document.createElement('a');
-
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      // Освобождаем временный URL после запуска скачивания.
-      window.URL.revokeObjectURL(downloadUrl);
-
-      // Читаем предупреждения из заголовка ответа.
-      var warningsHeader = response.headers.get('X-DG-Warnings');
-
-      if (warningsHeader) {
-        try {
-          // Заголовок URL-кодирован, поэтому сначала декодируем его, затем разбираем JSON.
-          var warnings = JSON.parse(decodeURIComponent(warningsHeader.replace(/\+/g, ' ')));
-
-          if (Array.isArray(warnings) && warnings.length > 0) {
-            DG.showExportMessage('warning', warnings);
-          }
-        } catch (parseError) {
-          console.error('Failed to parse document generator warnings:', parseError);
-        }
-      }
-
-      // Закрываем модальное окно после успешной обработки ответа.
-      hideModal(form);
     } catch (error) {
-      // Показываем сетевые ошибки и ошибки обработки ответа тем же способом.
-      hideModal(form);
-      DG.showExportMessage('error', error.message || 'Document generation failed.');
+      // При сетевой ошибке сохраняем окно открытым и сообщаем пользователю об ошибке.
+      DG.showExportMessage(
+        'error',
+        error.message || 'Document generation failed.'
+      );
     } finally {
-      // Разблокируем кнопку, если форма и кнопка ещё существуют.
+      // Разблокируем кнопку после завершения запроса, если форма ещё существует.
       if (submitButton && document.body.contains(submitButton)) {
         submitButton.disabled = false;
       }
