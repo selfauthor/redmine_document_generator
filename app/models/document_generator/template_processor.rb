@@ -505,7 +505,12 @@ module DocumentGenerator
     # @param error_behavior [String] Поведение при ошибках ('abort', 'skip_field', 'skip_record')
     # @return [Nokogiri::XML::Node] Обработанный узел
     def self.process_conditionals_in_block(block_node, context, ns, error_behavior = 'abort')
-      text_nodes = block_node.xpath('.//w:t', ns).to_a
+      # Выбираем XPath в зависимости от формата документа.
+      # Для Word сохраняем прежний поиск по пространству имён w.
+      # Для Excel используем локальное имя элемента, не зависящее от префикса.
+      text_xpath = ns.key?('w') ? './/w:t' : ".//*[local-name()='t']"
+
+      text_nodes = block_node.xpath(text_xpath, ns).to_a
       return block_node if text_nodes.empty?
       
       # Собираем полный текст с позициями узлов
@@ -555,30 +560,67 @@ module DocumentGenerator
     # ==========================================================================
     # ПОДСТАНОВКА ЗНАЧЕНИЙ В УЗЛЫ
     # ==========================================================================
-    # Подставляет значения полей в текстовые узлы
+    # Подставляет значения полей в текстовые узлы Word или Excel.
     #
-    # @param block_node [Nokogiri::XML::Node] XML-узел
-    # @param context [Hash] Контекст данных
-    # @param ns [Hash] Пространства имен XML
-    # @param error_behavior [String] Поведение при ошибках ('abort', 'skip_field', 'skip_record')
+    # @param block_node [Nokogiri::XML::Node] XML-узел обрабатываемого блока.
+    # @param context [Hash] Контекст текущей записи.
+    # @param ns [Hash] Пространства имён XML документа.
+    # @param error_behavior [String] Стратегия обработки ошибок:
+    #   'abort', 'skip_field' или 'skip_record'.
+    # @return [Nokogiri::XML::Node] Обработанный XML-узел.
     def self.substitute_in_block(block_node, context, ns, error_behavior = 'abort')
-      text_nodes = block_node.xpath('.//w:t', ns)
-      normalize_xml_nodes(block_node, ns)
-      block_node.xpath('.//w:t', ns).each_with_index do |text_node, idx|
-        original = text_node.text
-        cleaned = clean_control_markers(original)
-        substituted = substitute_markers(cleaned, context, error_behavior)
-        if original != substituted
-          text_node.content = substituted
+      # Word и Excel используют разные XML-пространства имён.
+      # Для Word сохраняем существующую нормализацию разбитых маркеров.
+      if ns.key?('w')
+        normalize_xml_nodes(
+          block_node,
+          ns
+        )
 
-          # Сохраняем пробелы в начале и конце текстового узла по правилам WordprocessingML.
-          if substituted.match?(/\A\s|\s\z/)
-            text_node['xml:space'] = 'preserve'
-          else
-            text_node.remove_attribute('xml:space')
-          end
+        text_nodes = block_node.xpath(
+          './/w:t',
+          ns
+        ).to_a
+      else
+        # Excel не должен проходить через Word-нормализацию.
+        # После преобразования sharedStrings текст находится непосредственно
+        # в элементах <t>.
+        text_nodes = block_node.xpath(
+          ".//*[local-name()='t']"
+        ).to_a
+      end
+
+      # Последовательно обрабатываем каждый текстовый узел.
+      text_nodes.each do |text_node|
+        original = text_node.text
+
+        # Удаляем управляющие маркеры, которые не должны попасть
+        # в конечный документ.
+        cleaned = clean_control_markers(
+          original
+        )
+
+        # Подставляем значения обычных полей.
+        substituted = substitute_markers(
+          cleaned,
+          context,
+          error_behavior
+        )
+
+        next if original == substituted
+
+        text_node.content = substituted
+
+        # Для Word сохраняем правила XML-пробелов.
+        # Для Excel этот атрибут также допустим и безвреден.
+        if substituted.match?(/\A\s|\s\z/)
+          text_node['xml:space'] = 'preserve'
+        else
+          text_node.remove_attribute('xml:space')
         end
       end
+
+      block_node
     end
 
     # ==========================================================================
@@ -652,13 +694,41 @@ module DocumentGenerator
     # ==========================================================================
     # ОЧИСТКА УПРАВЛЯЮЩИХ МАРКЕРОВ
     # ==========================================================================
-    # Удаляет управляющие маркеры из текста
+    # Удаляет управляющие команды из текста после их обработки.
     #
-    # @param text [String] Текст с маркерами
-    # @return [String] Очищенный текст
+    # @param text [String] Текст XML-узла.
+    # @return [String] Текст без управляющих команд.
     def self.clean_control_markers(text)
       return text unless text.is_a?(String)
-      text.gsub(/<%\s*(BEGIN_ROW|END_ROW|BEGIN_SUBTASKS|END_SUBTASKS|BEGIN_WATCHERS|END_WATCHERS|BEGIN_RELATIONS|END_RELATIONS|BEGIN_GROUP_HEADER|END_GROUP_HEADER|BEGIN_GROUP_HEADER_2|END_GROUP_HEADER_2|BEGIN_GROUP_FOOTER|END_GROUP_FOOTER|BEGIN_GROUP_FOOTER_2|END_GROUP_FOOTER_2|BEGIN_TOTAL|END_TOTAL|GROUP_BY|GROUP_BY_2|IF|ELSE|END)\s*%>/i, '')
+
+      text.gsub(
+        /<%\s*(
+          BEGIN_ROW|
+          END_ROW|
+          BEGIN_SUBTASKS|
+          END_SUBTASKS|
+          BEGIN_WATCHERS|
+          END_WATCHERS|
+          BEGIN_RELATIONS(?:\s*:\s*[^%]+)?|
+          END_RELATIONS|
+          BEGIN_GROUP_HEADER|
+          END_GROUP_HEADER|
+          BEGIN_GROUP_HEADER_2|
+          END_GROUP_HEADER_2|
+          BEGIN_GROUP_FOOTER|
+          END_GROUP_FOOTER|
+          BEGIN_GROUP_FOOTER_2|
+          END_GROUP_FOOTER_2|
+          BEGIN_TOTAL|
+          END_TOTAL|
+          GROUP_BY|
+          GROUP_BY_2|
+          IF|
+          ELSE|
+          END
+        )\s*%>/ix,
+        ''
+      )
     end
 
     # ==========================================================================
@@ -695,51 +765,91 @@ module DocumentGenerator
     # ОБРАБОТКА КОЛЛЕКЦИЙ (ПОДЗАДАЧИ, НАБЛЮДАТЕЛИ, СВЯЗИ)
     # ==========================================================================
     # Разворачивает блоки коллекций подзадач, наблюдателей и связей.
-    # Поддерживает маркеры в одном или нескольких XML-узлах,
-    # в том числе когда содержимое блока находится в абзаце
-    # с BEGIN-маркером или END-маркером.
     #
-    # @param block_nodes [Array<Nokogiri::XML::Node>] XML-узлы шаблона
-    # @param context [Hash] Контекст текущей задачи
-    # @param ns [Hash] Пространства имён XML
-    # @param error_behavior [String] Режим обработки ошибок:
-    #   'abort', 'skip_field' или 'skip_record'
-    # @return [Array<Nokogiri::XML::Node>] Узлы с обработанными коллекциями
+    # @param block_nodes [Array<Nokogiri::XML::Node>, Nokogiri::XML::Node] XML-узлы блока.
+    # @param context [Hash] Контекст текущей задачи.
+    # @param ns [Hash] Пространства имён XML.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @return [Array<Nokogiri::XML::Node>] Обработанные XML-узлы.
     def self.process_collection_blocks(block_nodes, context, ns, error_behavior)
-      # Приводим одиночный узел к массиву для единого алгоритма обработки.
+      # Приводим одиночный XML-узел к массиву.
       block_nodes = [block_nodes] unless block_nodes.is_a?(Array)
 
-      # Описываем доступные коллекции и соответствующие им префиксы полей.
+      # Описываем поддерживаемые коллекции.
       collections_config = {
-        'SUBTASKS' => { context_key: 'subtasks', item_prefix: 'Subtask' },
-        'WATCHERS' => { context_key: 'watchers', item_prefix: 'Watcher' },
-        'RELATIONS' => { context_key: 'relations', item_prefix: 'Relation' }
+        'SUBTASKS' => {
+          context_key: 'subtasks',
+          item_prefix: 'Subtask'
+        },
+        'WATCHERS' => {
+          context_key: 'watchers',
+          item_prefix: 'Watcher'
+        },
+        'RELATIONS' => {
+          context_key: 'relations',
+          item_prefix: 'Relation'
+        }
       }
 
-      # Выбираем XPath в зависимости от формата документа.
+      # Выбираем XPath текстовых узлов в зависимости от формата документа.
       is_word = ns.key?('w')
-      text_xpath = is_word ? './/w:t' : './/xmlns:t | .//xmlns:v'
+
+      text_xpath =
+        if is_word
+          './/w:t'
+        else
+          ".//*[local-name()='t']"
+        end
 
       collections_config.each do |marker_base, config|
-        # Формируем регулярные выражения для управляющих маркеров.
-        begin_regex = /<%\s*BEGIN_#{Regexp.escape(marker_base)}\s*%>/i
-        end_regex = /<%\s*END_#{Regexp.escape(marker_base)}\s*%>/i
+        # Для отношений допускается дополнительный фильтр:
+        # BEGIN_RELATIONS:blocks ... END_RELATIONS
+        if marker_base == 'RELATIONS'
+          begin_regex =
+            /<%\s*BEGIN_RELATIONS(?:\s*:\s*([^%]+?))?\s*%>/i
 
-        # Собираем текст каждого XML-узла и общий текст коллекции.
-        # Это позволяет находить маркеры, даже если Word разбил их на runs.
-        node_texts = block_nodes.map do |node|
-          node.xpath(text_xpath, ns).map(&:text).join
+          end_regex =
+            /<%\s*END_RELATIONS\s*%>/i
+        else
+          begin_regex =
+            /<%\s*BEGIN_#{Regexp.escape(marker_base)}\s*%>/i
+
+          end_regex =
+            /<%\s*END_#{Regexp.escape(marker_base)}\s*%>/i
         end
+
+        # Собираем текст каждого XML-узла.
+        node_texts = block_nodes.map do |node|
+          node.xpath(
+            text_xpath,
+            ns
+          ).map(&:text).join
+        end
+
         full_text = node_texts.join
 
-        begin_match = full_text.match(begin_regex)
+        # Ищем начало коллекционного блока.
+        begin_match = full_text.match(
+          begin_regex
+        )
+
         next unless begin_match
 
-        # Конец ищем только после начала текущего блока.
-        end_match = full_text.match(end_regex, begin_match.end(0))
+        # Ищем конец только после начала блока.
+        end_match = full_text.match(
+          end_regex,
+          begin_match.end(0)
+        )
+
         next unless end_match
 
-        # Определяем позиции маркеров относительно исходных XML-узлов.
+        # Для BEGIN_RELATIONS запоминаем необязательный тип связи.
+        relation_type =
+          if marker_base == 'RELATIONS'
+            begin_match[1]&.strip
+          end
+
+        # Определяем диапазон текста каждого XML-узла.
         node_ranges = []
         current_position = 0
 
@@ -748,14 +858,17 @@ module DocumentGenerator
             start: current_position,
             finish: current_position + node_text.length
           }
+
           current_position += node_text.length
         end
 
+        # Определяем XML-узел, содержащий BEGIN.
         begin_idx = node_ranges.index do |range|
           begin_match.begin(0) >= range[:start] &&
             begin_match.begin(0) < range[:finish]
         end
 
+        # Определяем XML-узел, содержащий END.
         end_idx = node_ranges.index do |range|
           end_match.begin(0) >= range[:start] &&
             end_match.begin(0) < range[:finish]
@@ -763,31 +876,58 @@ module DocumentGenerator
 
         next unless begin_idx && end_idx
 
-        # Получаем данные коллекции текущей задачи.
-        collection_data = context[config[:context_key]] || []
+        # Получаем исходную коллекцию текущей задачи.
+        collection_data =
+          context[config[:context_key]] || []
 
-        # Если оба маркера расположены в одном XML-узле,
-        # обрабатываем блок как обычную строковую коллекцию.
+        # Для BEGIN_RELATIONS:тип оставляем только связи указанного типа.
+        if marker_base == 'RELATIONS' && relation_type.present?
+          relation_type_key = I18n.t(
+            'document_generator.relation_type',
+            default: 'Relation Type'
+          )
+
+          collection_data = collection_data.select do |item|
+            item.is_a?(Hash) &&
+              item[relation_type_key].to_s.casecmp?(relation_type)
+          end
+        end
+
+        # Если BEGIN и END находятся в одном XML-узле,
+        # обрабатываем коллекцию непосредственно внутри текста.
         if begin_idx == end_idx
           block = block_nodes[begin_idx]
           block_text = node_texts[begin_idx]
 
           collection_regex =
-            /<%\s*BEGIN_#{Regexp.escape(marker_base)}\s*%>(.*?)<%\s*END_#{Regexp.escape(marker_base)}\s*%>/im
+            if marker_base == 'RELATIONS'
+              /<%\s*BEGIN_RELATIONS(?:\s*:\s*[^%]+?)?\s*%>(.*?)<%\s*END_RELATIONS\s*%>/im
+            else
+              /<%\s*BEGIN_#{Regexp.escape(marker_base)}\s*%>(.*?)<%\s*END_#{Regexp.escape(marker_base)}\s*%>/im
+            end
 
-          new_block_text = block_text.gsub(collection_regex) do
+          new_block_text = block_text.gsub(
+            collection_regex
+          ) do
             inner_template = Regexp.last_match(1)
 
             collection_data.map do |item|
-              # Создаём отдельный контекст для текущего элемента коллекции.
-              item_context = context.merge(config[:item_prefix] => item)
+              # Формируем контекст текущего элемента коллекции.
+              item_context = context.merge(
+                config[:item_prefix] => item
+              )
 
               begin
                 # Подставляем поля текущего элемента.
-                substitute_markers(inner_template, item_context, error_behavior)
-              rescue DocumentGenerator::SkipRecordError => e
-                # Пропускаем только текущий элемент коллекции, не затрагивая родительскую задачу.
-                item_issue = item.is_a?(Hash) ? item['__issue'] : nil
+                substitute_markers(
+                  inner_template,
+                  item_context,
+                  error_behavior
+                )
+              rescue DocumentGenerator::SkipRecordError
+                # Пропускаем только текущий элемент коллекции.
+                item_issue =
+                  item.is_a?(Hash) ? item['__issue'] : nil
 
                 Rails.logger.warn(
                   "[DocumentGenerator] Collection item was skipped; issue ##{item_issue&.id || 'unknown'}."
@@ -798,16 +938,22 @@ module DocumentGenerator
             end.join("\n")
           end
 
-          # Сохраняем результат в первом текстовом узле,
-          # очищая остальные узлы исходного блока.
-          text_nodes = block.xpath(text_xpath, ns)
-          text_nodes.each { |node| node.content = '' }
+          # Сохраняем результат в первом текстовом узле.
+          text_nodes = block.xpath(
+            text_xpath,
+            ns
+          )
+
+          text_nodes.each do |node|
+            node.content = ''
+          end
+
           text_nodes.first.content = new_block_text if text_nodes.first
 
           next
         end
 
-        # Если конец расположен раньше начала, структура некорректна.
+        # END не может находиться раньше BEGIN.
         if end_idx < begin_idx
           raise TemplateError,
                 I18n.t('document_generator.error_row_block_mismatch')
@@ -819,40 +965,52 @@ module DocumentGenerator
         begin_range = node_ranges[begin_idx]
         end_range = node_ranges[end_idx]
 
-        # Обрезает текст клона, оставляя только символы
-        # из указанного диапазона общего текста.
+        # Ограничивает текст XML-узла указанным диапазоном.
         trim_node_to_range = lambda do |node, node_start, range_start, range_end|
           local_position = 0
-          retained_text = +' '
+          retained_text = +''
 
-          node.xpath(text_xpath, ns).each do |text_node|
+          node.xpath(
+            text_xpath,
+            ns
+          ).each do |text_node|
             original_text = text_node.text
+
             text_start = node_start + local_position
             text_end = text_start + original_text.length
 
-            # Вычисляем пересечение текста узла с требуемым диапазоном.
-            keep_start = [text_start, range_start].max
-            keep_end = [text_end, range_end].min
+            keep_start = [
+              text_start,
+              range_start
+            ].max
+
+            keep_end = [
+              text_end,
+              range_end
+            ].min
 
             if keep_end > keep_start
-              fragment = original_text[
-                (keep_start - text_start)...(keep_end - text_start)
-              ] || ''
+              fragment =
+                original_text[
+                  (keep_start - text_start)...(keep_end - text_start)
+                ] || ''
             else
               fragment = ''
             end
 
             text_node.content = fragment
             retained_text << fragment
+
             local_position += original_text.length
           end
 
           retained_text.strip
         end
 
-        # Сохраняем текст перед BEGIN_SUBTASKS,
-        # если он находится в том же абзаце.
+        # Сохраняем текст до BEGIN, если он находится
+        # в том же XML-узле.
         prefix_node = begin_node.dup
+
         prefix_text = trim_node_to_range.call(
           prefix_node,
           begin_range[:start],
@@ -860,9 +1018,10 @@ module DocumentGenerator
           begin_match.begin(0)
         )
 
-        # Сохраняем текст после END_SUBTASKS,
-        # если он находится в том же абзаце.
+        # Сохраняем текст после END, если он находится
+        # в том же XML-узле.
         suffix_node = end_node.dup
+
         suffix_text = trim_node_to_range.call(
           suffix_node,
           end_range[:start],
@@ -870,18 +1029,21 @@ module DocumentGenerator
           end_range[:finish]
         )
 
-        prefix_nodes = prefix_text.empty? ? [] : [prefix_node]
-        suffix_nodes = suffix_text.empty? ? [] : [suffix_node]
+        prefix_nodes =
+          prefix_text.empty? ? [] : [prefix_node]
 
-        # Формируем XML-узлы для каждого элемента коллекции.
+        suffix_nodes =
+          suffix_text.empty? ? [] : [suffix_node]
+
+        # Формируем расширенный блок для всех элементов коллекции.
         expanded_blocks = []
 
         collection_data.each do |item|
-          # Вложенный контекст содержит поля основной задачи и текущего элемента коллекции.
-          item_context = context.merge(config[:item_prefix] => item)
+          # Формируем контекст текущего элемента коллекции.
+          item_context = context.merge(
+            config[:item_prefix] => item
+          )
 
-          # Сначала собираем узлы текущего элемента отдельно, чтобы при ошибке
-          # не добавить в документ частично обработанную подзадачу.
           item_blocks = []
 
           begin
@@ -889,10 +1051,10 @@ module DocumentGenerator
               template_node = block_nodes[node_idx]
               original_range = node_ranges[node_idx]
 
-              # Клонируем узел, сохраняя его исходное форматирование.
+              # Клонируем XML-узел.
               clone = template_node.dup
 
-              # Оставляем только текст между BEGIN и END.
+              # Оставляем только содержимое между BEGIN и END.
               retained_text = trim_node_to_range.call(
                 clone,
                 original_range[:start],
@@ -900,30 +1062,39 @@ module DocumentGenerator
                 end_match.begin(0)
               )
 
-              # Не добавляем пустые граничные абзацы.
+              # Пустые граничные узлы не добавляем.
               if (node_idx == begin_idx || node_idx == end_idx) &&
                  retained_text.empty?
                 next
               end
 
-              # Обрабатываем условия и поля в контексте текущего элемента.
+              # Обрабатываем вложенные условия.
               process_conditionals_in_block(
-                clone, item_context, ns, error_behavior
+                clone,
+                item_context,
+                ns,
+                error_behavior
               )
 
+              # Подставляем поля текущего элемента.
               substitute_in_block(
-                clone, item_context, ns, error_behavior
+                clone,
+                item_context,
+                ns,
+                error_behavior
               )
 
               item_blocks << clone
             end
 
-            # Добавляем обработанные узлы только после успешной обработки всего элемента.
-            expanded_blocks.concat(item_blocks)
-          rescue DocumentGenerator::SkipRecordError => e
-            # Исключение относится к текущему элементу коллекции.
-            # Остальные элементы и родительская задача продолжают обрабатываться.
-            item_issue = item.is_a?(Hash) ? item['__issue'] : nil
+            # Добавляем элемент только после полной успешной обработки.
+            expanded_blocks.concat(
+              item_blocks
+            )
+          rescue DocumentGenerator::SkipRecordError
+            # Ошибка относится только к текущему элементу коллекции.
+            item_issue =
+              item.is_a?(Hash) ? item['__issue'] : nil
 
             Rails.logger.warn(
               "[DocumentGenerator] Collection item was skipped; issue ##{item_issue&.id || 'unknown'}."
@@ -933,8 +1104,7 @@ module DocumentGenerator
           end
         end
 
-        # Заменяем исходный блок его внешним текстом
-        # и сформированными элементами коллекции.
+        # Заменяем исходный блок расширенным содержимым.
         block_nodes =
           block_nodes[0...begin_idx] +
           prefix_nodes +
@@ -948,4 +1118,4 @@ module DocumentGenerator
 
   end
 end
-# v2609301238
+# v2610051132

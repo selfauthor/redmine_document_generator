@@ -27,6 +27,8 @@ en:
     download_link_text: "Download file"
     settings_retention_hours_info: "Folders containing generated files are deleted after this number of hours from creation. Default: 24 hours."
     error_export_not_found: "The requested export was not found or has expired."
+    error_missing_end_row: "Missing closing marker <%END_ROW%> for <%BEGIN_ROW%> block"
+    error_row_block_mismatch: "Invalid <%BEGIN_ROW%> / <%END_ROW%> block structure"
     
     # Error messages
     error_invalid_filename: "File name contains invalid characters"
