@@ -66,6 +66,11 @@ module DocumentGenerator
     # @param entry_name [String] Имя файла в архиве
     def process_word_xml(doc, context, entry_name)
       ns = { 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main' }
+      process_total_blocks(
+        doc,
+        context,
+        ns
+      )
       records = context['records'] || []
       # Если есть блок BEGIN_ROW/END_ROW и есть записи - обрабатываем циклы
       if @parser_config[:blocks][:row] && records.present?
@@ -85,6 +90,84 @@ module DocumentGenerator
         # 3. Подставляем значения
         TemplateProcessor.substitute_in_block(block_node, render_context, ns, @error_behavior)
       end
+    end
+
+    # Разворачивает блок BEGIN_TOTAL/END_TOTAL один раз для всей выборки.
+    #
+    # @param doc [Nokogiri::XML::Document] XML-документ Word.
+    # @param context [Hash] Общий контекст выгрузки.
+    # @param ns [Hash] Пространства имён Word.
+    # @return [void]
+    def process_total_blocks(doc, context, ns)
+      all_nodes = doc.xpath(
+        '//w:tr | //w:p[not(ancestor::w:tr)]',
+        ns
+      ).to_a
+
+      begin_index = all_nodes.index do |node|
+        node.xpath('.//w:t', ns).map(&:text).join.match?(
+          /\A\s*<%\s*BEGIN_TOTAL\s*%>\s*\z/i
+        )
+      end
+
+      return unless begin_index
+
+      end_index = nil
+
+      ((begin_index + 1)...all_nodes.length).each do |index|
+        if all_nodes[index].xpath('.//w:t', ns).map(&:text).join.match?(
+          /\A\s*<%\s*END_TOTAL\s*%>\s*\z/i
+        )
+          end_index = index
+          break
+        end
+      end
+
+      unless end_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_end_total')
+      end
+
+      total_context = context.merge(
+        context['totals']&.first || {}
+      )
+
+      template_nodes = all_nodes[
+        (begin_index + 1)...end_index
+      ].to_a
+
+      parent = all_nodes[begin_index].parent
+
+      template_nodes.reverse_each do |node|
+        clone = node.dup
+
+        TemplateProcessor.process_collection_blocks(
+          clone,
+          total_context,
+          ns,
+          @error_behavior
+        )
+
+        TemplateProcessor.process_conditionals_in_block(
+          clone,
+          total_context,
+          ns,
+          @error_behavior
+        )
+
+        TemplateProcessor.substitute_in_block(
+          clone,
+          total_context,
+          ns,
+          @error_behavior
+        )
+
+        all_nodes[begin_index].add_previous_sibling(clone)
+      end
+
+      all_nodes[
+        begin_index..end_index
+      ].each(&:remove)
     end
 
     # Обработка блоков с циклами (BEGIN_ROW/END_ROW)
@@ -200,4 +283,4 @@ module DocumentGenerator
     end
   end
 end
-# v2609301230
+# v2610061508

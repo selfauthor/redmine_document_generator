@@ -105,67 +105,71 @@ module DocumentGenerator
     # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
     # @param context [Hash] Общий контекст данных выгрузки.
     # @param entry_name [String] Имя XML-файла листа внутри XLSX-архива.
-    # @param shared_strings [Array<String>] Значения из xl/sharedStrings.xml.
+    # @param shared_strings [Array<String>] Значения из sharedStrings.xml.
     # @return [void]
     def process_excel_xml(doc, context, entry_name, shared_strings)
       ns = {
         'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
       }
 
-      records = context['records'] || []
-
-      # Преобразуем ячейки типа shared string в inlineStr.
-      # После этого все текстовые маркеры Excel доступны непосредственно
-      # внутри XML листа и могут обрабатываться общей логикой TemplateProcessor.
+      # Преобразуем shared strings в inlineStr, чтобы дальнейшая обработка
+      # маркеров работала непосредственно с текстом ячеек.
       convert_shared_strings(doc, shared_strings, ns)
 
-      # Обрабатываем основной цикл записей.
-      #
-      # BEGIN_ROW и END_ROW являются отдельными строками Excel.
-      # Все строки между ними образуют шаблон одного элемента цикла.
-      process_excel_row_blocks(
+      process_excel_total_blocks(
         doc,
         context,
-        records,
         ns
       )
 
-      # После разворачивания BEGIN_ROW/END_ROW обрабатываем оставшиеся строки.
-      #
-      # Здесь могут находиться:
-      # - обычные поля;
-      # - IF/ELSE/END;
-      # - одиночные коллекции;
-      # - статический текст.
-      doc.xpath('//xmlns:row', ns).each do |row|
-        # Разворачиваем коллекции, если их управляющие команды находятся
-        # в пределах текущего XML-узла.
-        TemplateProcessor.process_collection_blocks(
-          row,
-          context.merge(records.first || {}),
-          ns,
-          @error_behavior
+      # При наличии групп используется отдельный механизм разворачивания
+      # первого и второго уровней группировки.
+      if context['groups']
+        process_excel_grouped_blocks(
+          doc,
+          context,
+          ns
+        )
+      else
+        records = context['records'] || []
+
+        # Обычный режим без группировки: BEGIN_ROW/END_ROW повторяется
+        # для каждой основной записи.
+        process_excel_row_blocks(
+          doc,
+          context,
+          records,
+          ns
         )
 
-        # Обрабатываем условия IF/ELSE/END внутри ячеек.
-        TemplateProcessor.process_conditionals_in_block(
-          row,
-          context.merge(records.first || {}),
-          ns,
-          @error_behavior
-        )
+        # После разворачивания циклических блоков обрабатываем оставшиеся
+        # статические строки, условия и обычные маркеры.
+        doc.xpath('//xmlns:row', ns).each do |row|
+          TemplateProcessor.process_collection_blocks(
+            row,
+            context.merge(records.first || {}),
+            ns,
+            @error_behavior
+          )
 
-        # Подставляем обычные поля шаблона.
-        TemplateProcessor.substitute_in_block(
-          row,
-          context.merge(records.first || {}),
-          ns,
-          @error_behavior
-        )
+          TemplateProcessor.process_conditionals_in_block(
+            row,
+            context.merge(records.first || {}),
+            ns,
+            @error_behavior
+          )
+
+          TemplateProcessor.substitute_in_block(
+            row,
+            context.merge(records.first || {}),
+            ns,
+            @error_behavior
+          )
+        end
       end
 
-      # После удаления шаблонных строк и вставки их копий Excel должен получить
-      # последовательную нумерацию строк и адресов ячеек.
+      # После удаления и вставки строк Excel должен получить непрерывную
+      # нумерацию строк и корректные адреса ячеек.
       reindex_excel_rows(doc, ns)
     end
 
@@ -243,6 +247,381 @@ module DocumentGenerator
         # Добавляем непосредственное текстовое содержимое.
         cell.add_child(inline_string)
       end
+    end
+
+    # Разворачивает Excel-шаблон с группировкой первого и второго уровней.
+    #
+    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
+    # @param context [Hash] Контекст с группами и агрегатами.
+    # @param ns [Hash] Пространства имён XML.
+    # @return [void]
+    def process_excel_grouped_blocks(doc, context, ns)
+      rows = doc.xpath('//xmlns:row', ns).to_a
+      groups = context['groups'] || []
+
+      footer_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*GROUP_FOOTER\s*%>\s*\z/i
+        )
+      end
+
+      unless footer_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_group_footer')
+      end
+
+      begin_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*BEGIN_ROW\s*%>\s*\z/i
+        )
+      end
+
+      unless begin_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_end_row')
+      end
+
+      end_index = nil
+
+      ((begin_index + 1)...rows.length).each do |index|
+        if excel_row_text(rows[index], ns).match?(
+          /\A\s*<%\s*END_ROW\s*%>\s*\z/i
+        )
+          end_index = index
+          break
+        end
+      end
+
+      unless end_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_end_row')
+      end
+
+      group_header_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*GROUP_HEADER\s*%>\s*\z/i
+        )
+      end
+
+      unless group_header_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_group_header')
+      end
+
+      group_header_2_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*GROUP_HEADER_2\s*%>\s*\z/i
+        )
+      end
+
+      group_footer_2_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*GROUP_FOOTER_2\s*%>\s*\z/i
+        )
+      end
+
+      # Статический префикс находится до GROUP_HEADER.
+      prefix_rows = rows[
+        0...group_header_index
+      ].to_a.reject do |row|
+        excel_group_control_row?(row, ns)
+      end
+
+      # Заголовок первого уровня заканчивается перед GROUP_HEADER_2
+      # или BEGIN_ROW. Поддерживаются оба допустимых варианта расположения
+      # управляющих маркеров.
+      group_header_end = [
+        group_header_2_index,
+        begin_index
+      ].compact.select { |index| index > group_header_index }.min
+
+      group_header_end ||= begin_index
+
+      group_header_rows = rows[
+        (group_header_index + 1)...group_header_end
+      ].to_a
+
+      # Заголовок второго уровня заканчивается перед BEGIN_ROW.
+      group_header_2_rows = []
+
+      if group_header_2_index
+        if group_header_2_index < begin_index
+          group_header_2_rows = rows[
+            (group_header_2_index + 1)...begin_index
+          ].to_a
+        else
+          raise DocumentGenerator::TemplateError,
+                I18n.t('document_generator.error_row_block_mismatch')
+        end
+      end
+
+      row_template = rows[
+        (begin_index + 1)...end_index
+      ].to_a
+
+      # Содержимое GROUP_FOOTER_2 находится между его маркером
+      # и GROUP_FOOTER.
+      group_footer_2_rows = []
+
+      if group_footer_2_index
+        if group_footer_2_index < footer_index
+          group_footer_2_rows = rows[
+            (group_footer_2_index + 1)...footer_index
+          ].to_a
+        else
+          raise DocumentGenerator::TemplateError,
+                I18n.t('document_generator.error_row_block_mismatch')
+        end
+      end
+
+      # В соответствии с синтаксисом шаблона GROUP_FOOTER является
+      # завершающим маркером группы. Поэтому строки после него являются
+      # обычным статическим текстом и не должны повторяться для каждой группы.
+      suffix_rows = rows[
+        (footer_index + 1)...rows.length
+      ].to_a.reject do |row|
+        excel_group_control_row?(row, ns)
+      end
+
+      # Строки между END_ROW и GROUP_FOOTER являются содержимым
+      # итогового блока первого уровня.
+      first_footer_start = end_index + 1
+
+      if group_footer_2_index
+        first_footer_end = group_footer_2_index
+      else
+        first_footer_end = footer_index
+      end
+
+      group_footer_rows = rows[
+        first_footer_start...first_footer_end
+      ].to_a.reject do |row|
+        excel_group_control_row?(row, ns)
+      end
+
+      expanded_rows = prefix_rows
+
+      groups.each do |group|
+        group_context = context.merge(
+          'GroupValue' => group['GroupValue'],
+          'count' => group['count']
+        )
+
+        # Передаём агрегаты первого уровня.
+        group.each do |key, value|
+          if key.to_s.start_with?('group_agg_')
+            group_context[key] = value
+          end
+        end
+
+        # Заголовок первого уровня.
+        expanded_rows.concat(
+          render_excel_group_rows(
+            group_header_rows,
+            group_context,
+            ns
+          )
+        )
+
+        second_groups = group['groups_2'] || []
+
+        if second_groups.empty?
+          group['records'].to_a.each do |record|
+            row_context = group_context.merge(record)
+
+            expanded_rows.concat(
+              render_excel_group_rows(
+                row_template,
+                row_context,
+                ns
+              )
+            )
+          end
+        else
+          second_groups.each do |group_2|
+            group_2_context = group_context.merge(
+              'GroupValue2' => group_2['GroupValue2'],
+              'count' => group_2['count']
+            )
+
+            # Передаём агрегаты второго уровня.
+            group_2.each do |key, value|
+              if key.to_s.start_with?('group_2_agg_')
+                group_2_context[key] = value
+              end
+            end
+
+            # Заголовок второго уровня.
+            expanded_rows.concat(
+              render_excel_group_rows(
+                group_header_2_rows,
+                group_2_context,
+                ns
+              )
+            )
+
+            # Основные записи второго уровня.
+            group_2['records'].to_a.each do |record|
+              row_context = group_2_context.merge(record)
+
+              expanded_rows.concat(
+                render_excel_group_rows(
+                  row_template,
+                  row_context,
+                  ns
+                )
+              )
+            end
+
+            # Необязательный итог второго уровня.
+            unless group_footer_2_rows.empty?
+              expanded_rows.concat(
+                render_excel_group_rows(
+                  group_footer_2_rows,
+                  group_2_context,
+                  ns
+                )
+              )
+            end
+          end
+        end
+
+        # Итог первого уровня.
+        unless group_footer_rows.empty?
+          expanded_rows.concat(
+            render_excel_group_rows(
+              group_footer_rows,
+              group_context,
+              ns
+            )
+          )
+        end
+      end
+
+      rows.each(&:remove)
+
+      root = doc.at_xpath('//xmlns:sheetData', ns)
+
+      expanded_rows.each do |row|
+        root.add_child(row)
+      end
+
+      suffix_rows.each do |row|
+        root.add_child(row)
+      end
+    end
+
+    # Клонирует и обрабатывает набор строк Excel с указанным контекстом.
+    #
+    # @param template_rows [Array<Nokogiri::XML::Node>] Шаблонные строки.
+    # @param context [Hash] Контекст конкретной группы или записи.
+    # @param ns [Hash] Пространства имен XML.
+    # @return [Array<Nokogiri::XML::Node>] Обработанные копии строк.
+    def render_excel_group_rows(template_rows, context, ns)
+      clones = template_rows.map(&:dup)
+
+      # Сначала разворачиваем вложенные коллекции текущего контекста.
+      clones = TemplateProcessor.process_collection_blocks(
+        clones,
+        context,
+        ns,
+        @error_behavior
+      )
+
+      # Затем обрабатываем условия и обычные маркеры.
+      clones.each do |clone|
+        TemplateProcessor.process_conditionals_in_block(
+          clone,
+          context,
+          ns,
+          @error_behavior
+        )
+
+        TemplateProcessor.substitute_in_block(
+          clone,
+          context,
+          ns,
+          @error_behavior
+        )
+      end
+
+      clones
+    end
+
+    # Проверяет, является ли строка Excel управляющей строкой группировки.
+    #
+    # @param row [Nokogiri::XML::Node] XML-узел строки Excel.
+    # @param ns [Hash] Пространства имен XML.
+    # @return [Boolean] true, если строка содержит только управляющую команду.
+    def excel_group_control_row?(row, ns)
+      text = excel_row_text(row, ns)
+
+      text.match?(
+        /\A\s*<%\s*(
+          GROUP_BY(?:_2)?\s*:\s*[^%]+|
+          GROUP_HEADER(?:_2)?|
+          GROUP_FOOTER(?:_2)?
+        )\s*%>\s*\z/ix
+      )
+    end
+
+    # Разворачивает блок BEGIN_TOTAL/END_TOTAL один раз для всей выборки,
+    # сохраняя его исходное положение относительно строк шаблона.
+    #
+    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
+    # @param context [Hash] Общий контекст выгрузки.
+    # @param ns [Hash] Пространства имён XML.
+    # @return [void]
+    def process_excel_total_blocks(doc, context, ns)
+      rows = doc.xpath('//xmlns:row', ns).to_a
+
+      begin_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*BEGIN_TOTAL\s*%>\s*\z/i
+        )
+      end
+
+      return unless begin_index
+
+      end_index = nil
+
+      ((begin_index + 1)...rows.length).each do |index|
+        if excel_row_text(rows[index], ns).match?(
+          /\A\s*<%\s*END_TOTAL\s*%>\s*\z/i
+        )
+          end_index = index
+          break
+        end
+      end
+
+      unless end_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_end_total')
+      end
+
+      total_context = context.merge(
+        context['totals']&.first || {}
+      )
+
+      template_rows = rows[
+        (begin_index + 1)...end_index
+      ].to_a
+
+      rendered_rows = render_excel_group_rows(
+        template_rows,
+        total_context,
+        ns
+      )
+
+      begin_row = rows[begin_index]
+
+      rendered_rows.reverse_each do |row|
+        begin_row.add_previous_sibling(row)
+      end
+
+      rows[
+        begin_index..end_index
+      ].each(&:remove)
     end
 
     # Разворачивает блоки BEGIN_ROW/END_ROW на листе Excel.
@@ -440,4 +819,4 @@ module DocumentGenerator
 
   end
 end
-# v2610051132
+# v2610061505

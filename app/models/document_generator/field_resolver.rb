@@ -26,7 +26,7 @@ module DocumentGenerator
       standard_fields = %w[
         project tracker status priority author assigned_to category fixed_version 
         subject description start_date due_date done_ratio estimated_hours 
-        spent_hours created_on updated_on closed_on
+        spent_hours created_on updated_on closed_on parent_id
       ]
 
       standard_fields.each do |field|
@@ -69,40 +69,56 @@ module DocumentGenerator
       cache
     end
 
-    # Разрешает строку имени поля из шаблона в структурированный хэш
+    # Разрешает строку имени поля из шаблона в структурированный хэш.
+    #
+    # Алгоритм разрешения:
+    # 1. Поле родительской задачи Parent.ИмяПоля обрабатывается отдельно.
+    # 2. Сначала ищется стандартное поле Redmine.
+    # 3. Если стандартного поля нет, ищется пользовательское поле по имени.
+    #
+    # При совпадении имени стандартного и пользовательского поля приоритет
+    # всегда имеет стандартное поле. Специальный префикс CF: в синтаксисе
+    # шаблонов не используется.
+    #
+    # @param field_name [String] Имя поля из шаблона.
+    # @return [Hash] Структурированное описание поля.
     def self.resolve(field_name)
       return nil if field_name.blank?
 
       original = field_name.strip
       name = original.downcase
 
-      # 1. Явное указание пользовательского поля: CF:ИмяПоля
-      if name.start_with?('cf:')
-        cf_name = name.sub(/^cf:\s*/, '')
-        cf_id = custom_fields_cache[cf_name] || custom_fields_cache[cf_name.gsub(/\s+/, '')]
-        return { type: :custom, key: "cf_#{cf_id}", cf_id: cf_id } if cf_id
-      end
-
-      # 2. Поле родительской задачи: Parent.ИмяПоля
+      # Поле родительской задачи разрешается через тот же механизм,
+      # что и обычное поле. Это позволяет использовать, например,
+      # <%Parent.Статус%> и <%Parent.Почтовый адрес%>.
       if name.start_with?('parent.')
         sub_field_name = original.sub(/^parent\.\s*/i, '').strip
         resolved = resolve(sub_field_name)
+
         if resolved && resolved[:type] != :parent
           resolved[:type] = :parent
           return resolved
         end
       end
 
-      # 3. Стандартное поле (по локализованному или латинскому имени)
+      # Сначала проверяем стандартные поля Redmine.
+      # Это обеспечивает требуемый приоритет стандартного поля,
+      # если его имя совпадает с именем пользовательского поля.
       if field_name_cache.key?(name)
         return { type: :standard, key: field_name_cache[name] }
       end
 
-      # 4. Пользовательское поле по имени (без префикса CF:)
+      # Если стандартного поля с таким именем нет, ищем пользовательское поле.
+      # Префикс CF: здесь намеренно не используется: пользователь обращается
+      # к пользовательскому полю непосредственно по его названию.
       cf_id = custom_fields_cache[name] || custom_fields_cache[name.gsub(/\s+/, '')]
-      return { type: :custom, key: "cf_#{cf_id}", cf_id: cf_id } if cf_id
 
-      # 5. Неизвестное поле (может быть спец. переменной или функцией, обработает рендерер)
+      if cf_id
+        return { type: :custom, key: "cf_#{cf_id}", cf_id: cf_id }
+      end
+
+      # Неизвестное поле передаётся вызывающему коду для обработки
+      # специальных переменных, функций или формирования ошибки шаблона.
       { type: :unknown, key: original }
     end
 
@@ -152,3 +168,4 @@ module DocumentGenerator
     end
   end
 end
+# v2610061512

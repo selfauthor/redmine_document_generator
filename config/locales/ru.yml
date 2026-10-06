@@ -29,7 +29,12 @@ ru:
     error_export_not_found: "Запрошенный результат выгрузки не найден или срок его хранения истёк."
     error_missing_end_row: "Не найден закрывающий маркер <%END_ROW%> для блока <%BEGIN_ROW%>"
     error_row_block_mismatch: "Некорректная структура блока <%BEGIN_ROW%> / <%END_ROW%>"
-    
+    error_group_by_2_without_group_by: "Нельзя использовать <%GROUP_BY_2:%> без <%GROUP_BY:%>."
+    error_missing_group_footer: "При использовании группировки должен присутствовать маркер <%GROUP_FOOTER%>."
+    error_missing_group_header: "При использовании группировки должен присутствовать маркер <%GROUP_HEADER%>."
+    error_unknown_group_field: "Поле группировки «%{field}» не найдено."
+    error_missing_end_total: "Не найден закрывающий маркер <%END_TOTAL%> для блока <%BEGIN_TOTAL%>."
+
     # Сообщения об ошибках
     error_invalid_filename: "Имя файла содержит недопустимые символы"
     error_invalid_template: "Ошибка в шаблоне: %{message}"
@@ -47,12 +52,13 @@ ru:
     error_row_template_missing: "В шаблоне Excel не найден маркер ROW в первой ячейке строки"
     error_field_not_found: "Поле '%{field}' не найдено или пусто"
     error_field_missing: "В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне."
+    error_duplicate_aggregate: "Агрегатная команда «%{aggregate}» используется в шаблоне более одного раза."
     unknown_record: "неизвестная запись"
     error_condition_evaluation: "Ошибка при вычислении условия «%{condition}»: %{message}"
     error_missing_end_marker: "Не найден закрывающий маркер <%END%> для условия IF(%{condition})"
     warning_field_missing: 'В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне. Поле пропущено.'
     warning_record_skipped: 'В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне. Запись пропущена.'
-    
+
     # Вспомогательные строки
     relation_type: "Тип связи"
     watcher_name: "Имя"

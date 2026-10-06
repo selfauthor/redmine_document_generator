@@ -29,7 +29,12 @@ en:
     error_export_not_found: "The requested export was not found or has expired."
     error_missing_end_row: "Missing closing marker <%END_ROW%> for <%BEGIN_ROW%> block"
     error_row_block_mismatch: "Invalid <%BEGIN_ROW%> / <%END_ROW%> block structure"
-    
+    error_group_by_2_without_group_by: "The <%GROUP_BY_2:%> marker cannot be used without <%GROUP_BY:%>."
+    error_missing_group_footer: "The <%GROUP_FOOTER%> marker is required when grouping is used."
+    error_missing_group_header: "The <%GROUP_HEADER%> marker is required when grouping is used."
+    error_unknown_group_field: "Grouping field '%{field}' was not found."
+    error_missing_end_total: "Missing closing marker <%END_TOTAL%> for <%BEGIN_TOTAL%> block."
+
     # Error messages
     error_invalid_filename: "File name contains invalid characters"
     error_invalid_template: "Template error: %{message}"
@@ -47,14 +52,13 @@ en:
     error_row_template_missing: "ROW marker not found in the first cell of the Excel template"
     error_field_not_found: "Field '%{field}' not found or empty"
     error_field_missing: "Task %{issue}: field '%{field}' specified in the template was not found."
-
+    error_duplicate_aggregate: "Aggregate command '%{aggregate}' is used more than once in the template."
     unknown_record: "unknown record"
-
     error_condition_evaluation: "Error evaluating condition '%{condition}': %{message}"
     error_missing_end_marker: "Missing closing marker <%END%> for condition IF(%{condition})"
     warning_field_missing: 'Field "%{field}" specified in the template was not found in issue %{issue}. The field was skipped.'
     warning_record_skipped: 'Field "%{field}" specified in the template was not found in issue %{issue}. The record was skipped.'
-    
+
     # Helper strings
     relation_type: "Relation Type"
     watcher_name: "Name"

@@ -7,114 +7,475 @@ module DocumentGenerator
   # Этот класс отвечает за обработку шаблонов Word и Excel.
   # 
   # ЯЗЫК ШАБЛОНОВ:
-  # ================
-  # 
-  # 1. УПРАВЛЯЮЩИЕ КОМАНДЫ:
-  # ------------------------
-  # <%IF(условие)%> ... <%ELSE%> ... <%END%>
-  #   Условное выполнение. Если условие истинно - выполняется первая ветка,
-  #   иначе - вторая (после ELSE). ELSE необязателен.
-  #   Пример: <%IF(Статус == 'Закрыт')%>Закрыта<%ELSE%>Открыта<%END%>
+  # ==============
   #
-  # <%BEGIN_ROW%> ... <%END_ROW%>
-  #   Цикл по записям. Блок между маркерами повторяется для каждой записи.
-  #   Для таблиц: если маркеры в ячейках - клонируется вся строка таблицы.
-  #   Для текста: если маркеры в абзацах - клонируются абзацы.
+  # Все конструкции шаблона имеют вид:
   #
-  # <%BEGIN_SUBTASKS%> ... <%END_SUBTASKS%>
-  #   Цикл по подзадачам текущей задачи.
-  #   Внутри блока доступны поля с префиксом Subtask.: 
-  #   <%Subtask.Тема%>, <%Subtask.Статус%> и т.д.
+  #   <%выражение%>
   #
-  # <%BEGIN_WATCHERS%> ... <%END_WATCHERS%>
-  #   Цикл по наблюдателям задачи.
-  #   Внутри: <%Watcher.Имя%>
+  # Имена полей могут содержать символы Unicode. Специального префикса
+  # для пользовательских полей нет.
   #
-  # <%BEGIN_RELATIONS%> ... <%END_RELATIONS%>
-  #   Цикл по связанным задачам.
-  #   Внутри: <%Relation.Тип%>, <%Relation.Тема%>, <%Relation.Статус%>
   #
-  # <%BEGIN_RELATIONS:тип%> ... <%END_RELATIONS%>
-  #   Цикл по связям конкретного типа (blocks, relates, и т.д.)
+  # 1. ПОЛЯ ЗАДАЧИ
+  # ==============
   #
-  # 2. ПОЛЯ ДАННЫХ:
-  # ---------------
-  # <%ИмяПоля%> - подстановка значения поля
-  #   Стандартные поля: ID, Тема, Описание, Статус, Приоритет, Автор, 
-  #   Назначенный, Дата начала, Срок, Готовность, Оценка времени, 
-  #   Фактическое время, Дата создания, Дата обновления, Дата закрытия,
-  #   Проект, Трекер, Категория, Версия, Parent (ID родителя)
+  # <%ИмяПоля%>
+  #   Подставляет значение поля текущей задачи.
   #
-  # <%Parent.ИмяПоля%> - поле родительской задачи
-  #   Пример: <%Parent.Тема%>, <%Parent.Статус%>
+  # Примеры:
   #
-  # <%Subtask.ИмяПоля%> - поле подзадачи (внутри цикла BEGIN_SUBTASKS)
-  # <%Watcher.Имя%> - имя наблюдателя (внутри цикла BEGIN_WATCHERS)
-  # <%Relation.ИмяПоля%> - поле связанной задачи (внутри цикла BEGIN_RELATIONS)
+  #   <%ID%>
+  #   <%Тема%>
+  #   <%Описание%>
+  #   <%Статус%>
+  #   <%Приоритет%>
+  #   <%Автор%>
+  #   <%Назначенный%>
+  #   <%Дата начала%>
+  #   <%Срок%>
+  #   <%Готовность%>
+  #   <%Оценка времени%>
+  #   <%Фактическое время%>
+  #   <%Дата создания%>
+  #   <%Дата обновления%>
+  #   <%Дата закрытия%>
+  #   <%Проект%>
+  #   <%Трекер%>
+  #   <%Категория%>
+  #   <%Версия%>
   #
-  # <%ИмяПользовательскогоПоля%> - обращение к пользовательскому полю
-  #   Пример: <%Сложность%>, <%Срочность%>
+  # Доступны стандартные поля Redmine и пользовательские поля задачи.
   #
-  # <%CF:ИмяПоля%> - явное указание пользовательского поля
-  #   (если имя конфликтует со стандартным полем)
+  # Пользовательское поле указывается непосредственно по его названию:
   #
-  # 3. СПЕЦИАЛЬНЫЕ ПЕРЕМЕННЫЕ:
-  # --------------------------
-  # <%row_number%> - порядковый номер записи в выборке (начиная с 1)
-  # <%row_number_in_group%> - номер записи внутри текущей группы
-  # <%GroupValue%> - значение поля группировки для текущего блока
-  # <%GroupValue2%> - значение поля второго уровня группировки
+  #   <%Сложность%>
+  #   <%Срочность%>
+  #   <%Почтовый адрес%>
   #
-  # 4. АГРЕГАТНЫЕ ФУНКЦИИ (для групповых и итоговых строк):
-  # ------------------------------------------------------
-  # <%count%> - количество записей в группе/выборке
-  # <%sum(ИмяПоля)%> - сумма значений числового поля
-  # <%avg(ИмяПоля)%> - среднее значение
-  # <%min(ИмяПоля)%> - минимальное значение
-  # <%max(ИмяПоля)%> - максимальное значение
-  # <%concat(ИмяПоля, ', ')%> - перечисление значений через разделитель
+  # Если название пользовательского поля совпадает с названием стандартного
+  # поля, приоритет имеет стандартное поле.
   #
-  # Префикс total_ для общих итогов:
-  # <%total_count%> - общее количество записей
-  # <%total_sum(ИмяПоля)%> - общая сумма
-  # <%total_avg(ИмяПоля)%> - общее среднее
   #
-  # 5. ФУНКЦИИ ФОРМАТИРОВАНИЯ:
-  # --------------------------
-  # <%date(Дата создания, 'DD.MM.YYYY')%> - форматирование даты
-  # <%now('DD.MM.YYYY HH:mm')%> - текущая дата/время
-  # <%upper(Тема)%> - ВЕРХНИЙ РЕГИСТР
-  # <%lower(Тема)%> - нижний регистр
-  # <%capitalize(Тема)%> - Первая буква заглавная
-  # <%truncate(Описание, 100)%> - обрезка до N символов
-  # <%strip_html(Описание)%> - удаление HTML-тегов
-  # <%nl2br(Описание)%> - переносы строк в <br>
-  # <%replace(Тема, 'старое', 'новое')%> - замена подстроки
-  # <%number(Оценка времени, 2)%> - форматирование числа (2 знака после запятой)
-  # <%default(Назначенный, 'не назначен')%> - значение по умолчанию
-  # <%length(Тема)%> - длина строки
-  # <%concat(Тема, ' (', ID, ')')%> - конкатенация строк
+  # 2. ПОЛЕ РОДИТЕЛЬСКОЙ ЗАДАЧИ
+  # ============================
   #
-  # 6. МЕТАДАННЫЕ ВЫГРУЗКИ:
-  # -----------------------
-  # <%ExportDate%> - дата/время формирования отчёта
-  # <%ExportUser%> - имя пользователя, запустившего выгрузку
-  # <%ProjectName%> - название проекта
-  # <%QueryName%> - имя сохранённого запроса (если есть)
-  # <%FilterDescription%> - текстовое описание условий фильтра
+  # <%Parent.ИмяПоля%>
+  #   Подставляет значение указанного поля родительской задачи.
   #
-  # 7. ГРУППИРОВКА (для Excel):
-  # ---------------------------
-  # <%GROUP_BY:Статус%> - директива группировки (первый уровень)
-  # <%GROUP_BY_2:Назначенный%> - второй уровень группировки
+  # Примеры:
   #
-  # Для Excel маркеры размещаются в первой ячейке строки:
-  # GROUP_HEADER - заголовок группы (1-й уровень)
-  # GROUP_HEADER_2 - заголовок группы (2-й уровень)
-  # ROW - строка данных (повторяется для каждой записи)
-  # GROUP_FOOTER_2 - итоги группы (2-й уровень)
-  # GROUP_FOOTER - итоги группы (1-й уровень)
-  # TOTAL - общие итоги по выборке
+  #   <%Parent.ID%>
+  #   <%Parent.Тема%>
+  #   <%Parent.Статус%>
+  #
+  #
+  # 3. ПОДЗАДАЧИ
+  # ============
+  #
+  # <%BEGIN_SUBTASKS%>
+  #   Начало блока повторения по подзадачам текущей задачи.
+  #
+  # <%END_SUBTASKS%>
+  #   Конец блока повторения по подзадачам.
+  #
+  # Блок между этими командами повторяется для каждой подзадачи.
+  #
+  # Внутри блока доступны поля с префиксом Subtask.:
+  #
+  #   <%Subtask.ID%>
+  #   <%Subtask.Тема%>
+  #   <%Subtask.Статус%>
+  #   <%Subtask.Автор%>
+  #
+  #
+  # 4. НАБЛЮДАТЕЛИ
+  # ==============
+  #
+  # <%BEGIN_WATCHERS%>
+  #   Начало блока повторения по наблюдателям текущей задачи.
+  #
+  # <%END_WATCHERS%>
+  #   Конец блока повторения по наблюдателям.
+  #
+  # Внутри блока доступны поля текущего наблюдателя:
+  #
+  #   <%Watcher.ID%>
+  #   <%Watcher.Имя%>
+  #   <%Watcher.Фамилия%>
+  #   <%Watcher.Email%>
+  #
+  #
+  # 5. СВЯЗИ ЗАДАЧ
+  # ==============
+  #
+  # <%BEGIN_RELATIONS%>
+  #   Начало блока повторения по связанным задачам.
+  #
+  # <%END_RELATIONS%>
+  #   Конец блока повторения по связанным задачам.
+  #
+  # Внутри блока доступны поля связанной задачи:
+  #
+  #   <%Relation.ID%>
+  #   <%Relation.Тема%>
+  #   <%Relation.Статус%>
+  #   <%Relation.Тип%>
+  #
+  # Для выборки связей только определённого типа используется:
+  #
+  # <%BEGIN_RELATIONS:тип%>
+  #   Начало блока связей указанного типа.
+  #
+  # <%END_RELATIONS%>
+  #   Конец блока.
+  #
+  # Примеры:
+  #
+  #   <%BEGIN_RELATIONS:blocks%>
+  #   <%Relation.Тема%>
+  #   <%END_RELATIONS%>
+  #
+  #   <%BEGIN_RELATIONS:relates%>
+  #   <%Relation.Тема%>
+  #   <%END_RELATIONS%>
+  #
+  #
+  # 6. ПОВТОРЕНИЕ ОСНОВНЫХ ЗАПИСЕЙ
+  # ==============================
+  #
+  # <%BEGIN_ROW%>
+  #   Начало блока основной записи.
+  #
+  # <%END_ROW%>
+  #   Конец блока основной записи.
+  #
+  # Блок между BEGIN_ROW и END_ROW повторяется для каждой основной задачи
+  # результата выборки.
+  #
+  # В Excel при расположении управляющих маркеров в строках таблицы
+  # повторяется соответствующая строка.
+  #
+  # В Word повторяется соответствующий блок документа.
+  #
+  #
+  # 7. УСЛОВИЯ
+  # ===========
+  #
+  # <%IF(условие)%>
+  #   Начало условного блока.
+  #
+  # <%ELSE%>
+  #   Необязательная альтернативная ветка.
+  #
+  # <%END%>
+  #   Конец условного блока.
+  #
+  # Пример:
+  #
+  #   <%IF(Статус == 'Закрыт')%>
+  #   Задача закрыта
+  #   <%ELSE%>
+  #   Задача открыта
+  #   <%END%>
+  #
+  # В условии можно использовать значения полей текущего контекста.
+  #
+  #
+  # 8. НУМЕРАЦИЯ ЗАПИСЕЙ
+  # ====================
+  #
+  # <%row_number%>
+  #   Глобальный порядковый номер основной записи.
+  #
+  # Нумерация начинается с 1.
+  #
+  # Номер увеличивается только для основных записей выборки.
+  # Подзадачи, наблюдатели и связанные задачи не изменяют row_number.
+  #
+  # <%row_number_in_group%>
+  #   Порядковый номер основной записи внутри группы первого уровня.
+  #
+  # <%row_number_in_group_2%>
+  #   Порядковый номер основной записи внутри группы второго уровня.
+  #
+  #
+  # 9. ГРУППИРОВКА
+  # ==============
+  #
+  # Группировка предназначена для Excel-шаблонов.
+  #
+  # Первый уровень:
+  #
+  # <%GROUP_BY:ИмяПоля%>
+  #
+  #   Задаёт поле первого уровня группировки.
+  #
+  # Второй уровень:
+  #
+  # <%GROUP_BY_2:ИмяПоля%>
+  #
+  #   Задаёт поле второго уровня вложенной группировки.
+  #
+  # Второй уровень группировки является вложенным в первый.
+  # Он НЕ является отдельной группировкой всего набора записей.
+  #
+  # Допустимы оба варианта расположения команд:
+  #
+  #   <%GROUP_BY:Поле1%>
+  #   <%GROUP_BY_2:Поле2%>
+  #   <%GROUP_HEADER%>
+  #   <%GROUP_HEADER_2%>
+  #
+  # и:
+  #
+  #   <%GROUP_BY:Поле1%>
+  #   <%GROUP_HEADER%>
+  #   <%GROUP_BY_2:Поле2%>
+  #   <%GROUP_HEADER_2%>
+  #
+  #
+  # 10. ЗАГОЛОВОК ГРУППЫ ПЕРВОГО УРОВНЯ
+  # ====================================
+  #
+  # <%GROUP_HEADER%>
+  #
+  #   Маркер начала содержимого заголовка группы первого уровня.
+  #
+  # Строка с самим маркером является управляющей и удаляется из результата.
+  #
+  # В заголовке доступны:
+  #
+  #   <%GroupValue%>
+  #   <%count%>
+  #   агрегаты текущей группы
+  #   обычные поля контекста группы
+  #
+  # Пример:
+  #
+  #   <%GROUP_HEADER%>
+  #   Статус: <%GroupValue%>
+  #   Количество: <%count%>
+  #
+  #
+  # 11. ЗАГОЛОВОК ГРУППЫ ВТОРОГО УРОВНЯ
+  # ====================================
+  #
+  # <%GROUP_HEADER_2%>
+  #
+  #   Маркер начала содержимого заголовка вложенной группы второго уровня.
+  #
+  # В заголовке доступны:
+  #
+  #   <%GroupValue%>
+  #   <%GroupValue2%>
+  #   <%count%>
+  #   агрегаты текущей группы второго уровня
+  #
+  #
+  # 12. ИТОГ ГРУППЫ ВТОРОГО УРОВНЯ
+  # ================================
+  #
+  # <%GROUP_FOOTER_2%>
+  #
+  #   Необязательный блок итогов группы второго уровня.
+  #
+  # Внутри доступны значения и агрегаты соответствующей группы второго уровня.
+  #
+  #
+  # 13. ИТОГ ГРУППЫ
+  # ===============
+  #
+  # <%GROUP_FOOTER%>
+  #
+  #   Обязательный завершающий блок при использовании любой группировки.
+  #
+  # GROUP_FOOTER закрывает все уровни текущей группировки.
+  #
+  # Если используется GROUP_BY или GROUP_BY_2, наличие GROUP_FOOTER обязательно.
+  #
+  # После GROUP_FOOTER разрешён произвольный статический текст.
+  #
+  #
+  # 14. ОБЩИЕ ИТОГИ
+  # ===============
+  #
+  # <%BEGIN_TOTAL%>
+  #   Начало блока общих итогов по всей выборке.
+  #
+  # <%END_TOTAL%>
+  #   Конец блока общих итогов.
+  #
+  # Общие агрегаты в этом блоке используют префикс total_.
+  #
+  #
+  # 15. КОЛИЧЕСТВО ЗАПИСЕЙ
+  # =======================
+  #
+  # <%count%>
+  #
+  #   Количество основных записей текущего контейнера повторения.
+  #
+  # В GROUP_HEADER/GROUP_FOOTER:
+  #   количество записей текущей группы первого уровня.
+  #
+  # В GROUP_HEADER_2/GROUP_FOOTER_2:
+  #   количество записей текущей группы второго уровня.
+  #
+  # В BEGIN_ROW, BEGIN_SUBTASKS, BEGIN_WATCHERS, BEGIN_RELATIONS и
+  # вне контейнера группировки использование count запрещено и считается
+  # ошибкой шаблона.
+  #
+  # <%total_count%>
+  #
+  #   Общее количество основных записей всей выборки.
+  #
+  #
+  # 16. АГРЕГАТНЫЕ ФУНКЦИИ
+  # =======================
+  #
+  # Агрегаты первого уровня:
+  #
+  # <%sum(ИмяПоля)%>
+  #   Сумма значений указанного поля в текущем контейнере.
+  #
+  # <%avg(ИмяПоля)%>
+  #   Среднее арифметическое значений указанного поля.
+  #
+  # <%min(ИмяПоля)%>
+  #   Минимальное значение указанного поля.
+  #
+  # <%max(ИмяПоля)%>
+  #   Максимальное значение указанного поля.
+  #
+  # Общие агрегаты:
+  #
+  # <%total_sum(ИмяПоля)%>
+  #   Сумма значений указанного поля по всей выборке.
+  #
+  # <%total_avg(ИмяПоля)%>
+  #   Среднее значение по всей выборке.
+  #
+  # <%total_min(ИмяПоля)%>
+  #   Минимальное значение по всей выборке.
+  #
+  # <%total_max(ИмяПоля)%>
+  #   Максимальное значение по всей выборке.
+  #
+  # count и total_count являются специальными переменными и не являются
+  # агрегатами с аргументом поля.
+  #
+  # Каждая агрегатная команда может присутствовать в шаблоне только один раз.
+  # Повторное использование одной и той же агрегатной команды является
+  # ошибкой шаблона.
+  #
+  #
+  # 17. ФУНКЦИИ ФОРМАТИРОВАНИЯ
+  # ===========================
+  #
+  # Функции форматирования работают с отдельными значениями.
+  # Они НЕ являются агрегатами.
+  #
+  # <%date(ИмяПоля, 'формат')%>
+  #   Форматирует дату или дату/время.
+  #
+  #   Пример:
+  #   <%date(Дата создания, 'DD.MM.YYYY')%>
+  #
+  # <%now('формат')%>
+  #   Возвращает текущие дату и время.
+  #
+  #   Пример:
+  #   <%now('DD.MM.YYYY HH:mm')%>
+  #
+  # <%upper(ИмяПоля)%>
+  #   Переводит значение в верхний регистр.
+  #
+  # <%lower(ИмяПоля)%>
+  #   Переводит значение в нижний регистр.
+  #
+  # <%capitalize(ИмяПоля)%>
+  #   Делает первую букву строки прописной.
+  #
+  # <%truncate(ИмяПоля, N)%>
+  #   Ограничивает строку длиной N символов.
+  #
+  # <%strip_html(ИмяПоля)%>
+  #   Удаляет HTML-теги из значения.
+  #
+  # <%nl2br(ИмяПоля)%>
+  #   Преобразует переводы строк в HTML-теги <br>.
+  #
+  # <%replace(ИмяПоля, 'старое', 'новое')%>
+  #   Заменяет указанную подстроку.
+  #
+  # <%number(ИмяПоля, N)%>
+  #   Форматирует числовое значение с N знаками после десятичного разделителя.
+  #
+  # <%default(ИмяПоля, 'значение')%>
+  #   Возвращает значение поля, если оно заполнено, либо указанное значение
+  #   по умолчанию, если поле пустое.
+  #
+  # <%length(ИмяПоля)%>
+  #   Возвращает длину строкового значения.
+  #
+  # <%concat(аргумент1, аргумент2, ...)%>
+  #   Объединяет несколько значений в одну строку.
+  #
+  # Аргументом concat может быть поле или строковый литерал.
+  #
+  # Пример:
+  #
+  #   <%concat(Тема, ' (', ID, ')')%>
+  #
+  # concat является функцией форматирования и не выполняет группового
+  # агрегирования.
+  #
+  #
+  # 18. МЕТАДАННЫЕ ВЫГРУЗКИ
+  # ========================
+  #
+  # <%ExportDate%>
+  #   Дата и время формирования документа.
+  #
+  # <%ExportUser%>
+  #   Пользователь Redmine, запустивший выгрузку.
+  #
+  # <%ProjectName%>
+  #   Название текущего проекта.
+  #
+  # <%QueryName%>
+  #   Название сохранённого запроса, если выгрузка выполняется по сохранённому
+  #   запросу.
+  #
+  # <%FilterDescription%>
+  #   Текстовое описание применённых условий фильтрации.
+  #
+  #
+  # 19. СТАТИЧЕСКИЙ ТЕКСТ
+  # =====================
+  #
+  # Любой текст, не заключённый в <% ... %>, считается обычным текстом
+  # шаблона и переносится в результирующий документ без обработки.
+  #
+  # После <%GROUP_FOOTER%> разрешён произвольный статический текст.
+  #
+  #
+  # 20. ОГРАНИЧЕНИЯ И ПРАВИЛА
+  # ==========================
+  #
+  # - Стандартное поле имеет приоритет перед пользовательским полем
+  #   с таким же названием.
+  # - GROUP_BY_2 используется только вместе с GROUP_BY.
+  # - При наличии GROUP_BY или GROUP_BY_2 GROUP_FOOTER обязателен.
+  # - GROUP_FOOTER закрывает все уровни группировки.
+  # - GROUP_FOOTER_2 является необязательным.
+  # - count допустим только в контексте группы.
+  # - total_count относится ко всей выборке.
+  # - row_number относится только к основным записям.
+  # - Подзадачи, наблюдатели и связи не изменяют row_number.
+  # - concat является функцией форматирования, а не агрегатом.
+  # - Каждая агрегатная команда может использоваться в шаблоне только один раз.
   #
   # ============================================================================
 
@@ -255,123 +616,82 @@ module DocumentGenerator
       end
     end
 
-    # ==========================================================================
-    # ПОДСТАНОВКА ЗНАЧЕНИЙ (общая логика для Word и Excel)
-    # ==========================================================================
-    # Подставляет значения в маркеры шаблона и обрабатывает отсутствующие поля.
+    # Подставляет значения в маркеры шаблона.
+    #
+    # Метод различает:
+    # - обычные поля;
+    # - специальные переменные;
+    # - count/total_count;
+    # - агрегатные функции;
+    # - функции форматирования.
     #
     # @param text [String] Текст, содержащий маркеры.
-    # @param context [Hash] Контекст текущей записи или подзадачи.
-    # @param error_behavior [String] Выбранная стратегия обработки ошибок.
+    # @param context [Hash] Контекст текущей записи или группы.
+    # @param error_behavior [String] Стратегия обработки ошибок.
     # @return [String] Текст с подставленными значениями.
-    # @raise [DocumentGenerator::RenderError] При отсутствии поля в режиме abort.
-    # @raise [DocumentGenerator::SkipRecordError] При пропуске записи.
     def self.substitute_markers(text, context, error_behavior = 'abort')
       return text unless text.is_a?(String)
 
-      text.gsub(/<%\s*(.*?)\s*%>/) do
-        key = Regexp.last_match(1).strip
-        parts = key.split('.')
+      text.gsub(/<%\s*(.*?)\s*%>/m) do
+        expression = Regexp.last_match(1).strip
 
-        # Последовательно ищем вложенный контекст поля.
-        parent = parts[0...-1].inject(context) do |memo, part|
-          memo.is_a?(Hash) ? memo[part] : nil
-        end
-
-        field_key = parts.last
-        field_exists =
-          if parts.length == 1
-            context.is_a?(Hash) && context.key?(field_key)
+        begin
+          # Сначала обрабатываем специальные функции, поскольку их синтаксис
+          # отличается от обычного имени поля.
+          if expression.match?(/\A[a-z_][a-z0-9_]*\s*\(/i)
+            evaluate_template_function(
+              expression,
+              context,
+              error_behavior
+            )
+          elsif expression.casecmp?('count')
+            evaluate_count(
+              context,
+              error_behavior
+            )
+          elsif expression.casecmp?('total_count')
+            evaluate_total_count(
+              context,
+              error_behavior
+            )
           else
-            parent.is_a?(Hash) && parent.key?(field_key)
-          end
+            # Обычный маркер поля.
+            value = get_context_value(
+              expression,
+              context
+            )
 
-        value =
-          if field_exists
-            parts.length == 1 ? context[field_key] : parent[field_key]
-          end
-
-        # Существующее пустое поле не является ошибкой.
-        next '' if field_exists && (value.nil? || value.to_s.strip.empty?)
-
-        unless field_exists
-          # Получаем сведения о задаче для формирования сообщения.
-
-          # Для вложенного поля используем объект текущей подзадачи или элемента коллекции.
-          # Если вложенного объекта нет, сохраняем привязку к основной задаче.
-          issue =
-            if parts.length > 1 && parent.is_a?(Hash)
-              parent['__issue'] || context['__issue']
+            if context_value_exists?(expression, context)
+              value.nil? ? '' : value.to_s
             else
-              context['__issue']
+              handle_missing_template_field(
+                expression,
+                context,
+                error_behavior
+              )
             end
-
-          issue_label =
-            if issue.respond_to?(:id)
-              "##{issue.id} — #{issue.subject}"
-            elsif issue.is_a?(Hash)
-              "##{issue['id']} — #{issue['subject']}"
-            else
-              I18n.t('document_generator.unknown_record')
-            end
-
-          # Формируем локализованное сообщение об отсутствующем поле.
+          end
+        rescue DocumentGenerator::SkipRecordError
+          raise
+        rescue DocumentGenerator::RenderError
+          raise
+        rescue DocumentGenerator::TemplateError
+          raise
+        rescue StandardError => e
           message = I18n.t(
-            'document_generator.error_field_missing',
-            issue: issue_label,
-            field: key
+            'document_generator.error_function_failed',
+            func: expression,
+            message: e.message
           )
 
-          case error_behavior
-          when 'abort'
-            # Прерываем выгрузку с локализованным сообщением об ошибке.
-            raise DocumentGenerator::RenderError, message
+          handle_template_error(
+            message,
+            context,
+            error_behavior
+          )
 
-          when 'skip_field'
-            # Формируем предупреждение и сохраняем его для отображения на странице.
-            warning = I18n.t(
-              'document_generator.warning_field_missing',
-              issue: issue_label,
-              field: key
-            )
-
-            warnings = context['__warnings']
-            warnings << warning if warnings.is_a?(Array)
-
-            # Записываем диагностическую информацию на английском языке.
-            Rails.logger.warn(
-              "[DocumentGenerator] Missing template field '#{key}' in issue #{issue&.id || 'unknown'}; field skipped."
-            )
-
-            # Заменяем отсутствующее поле пустой строкой.
-            next ''
-
-          when 'skip_record'
-            # Формируем предупреждение о пропуске всей записи.
-            warning = I18n.t(
-              'document_generator.warning_record_skipped',
-              issue: issue_label,
-              field: key
-            )
-
-            warnings = context['__warnings']
-            warnings << warning if warnings.is_a?(Array)
-
-            # Записываем диагностическую информацию на английском языке.
-            Rails.logger.warn(
-              "[DocumentGenerator] Missing template field '#{key}' in issue #{issue&.id || 'unknown'}; record will be skipped."
-            )
-
-            # Передаём исключение обработчику пропуска записи.
-            raise DocumentGenerator::SkipRecordError, warning
-
-          else
-            # Неизвестный режим обработки считается ошибкой шаблона.
-            raise DocumentGenerator::RenderError, message
-          end
+          ''
         end
-
-        value.to_s
       end
     end
 
@@ -623,6 +943,572 @@ module DocumentGenerator
       block_node
     end
 
+    # Разбирает список аргументов функции с учётом кавычек.
+    #
+    # Обычный String#split(',') здесь не подходит, поскольку запятая
+    # может находиться внутри строкового литерала.
+    #
+    # @param arguments [String] Строка аргументов функции.
+    # @return [Array<String>] Массив отдельных аргументов.
+    def self.split_function_arguments(arguments)
+      result = []
+      current = +''
+      quote = nil
+      escaped = false
+
+      arguments.each_char do |char|
+        if escaped
+          current << char
+          escaped = false
+          next
+        end
+
+        if char == '\\' && quote
+          current << char
+          escaped = true
+          next
+        end
+
+        if quote
+          current << char
+
+          if char == quote
+            quote = nil
+          end
+
+          next
+        end
+
+        if char == "'" || char == '"'
+          quote = char
+          current << char
+        elsif char == ','
+          result << current.strip
+          current = +''
+        else
+          current << char
+        end
+      end
+
+      result << current.strip unless current.empty?
+
+      result
+    end
+
+    # Выполняет функцию шаблона.
+    #
+    # @param expression [String] Выражение функции без внешних маркеров <% %>.
+    # @param context [Hash] Контекст текущей записи или группы.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @return [String] Результат выполнения функции.
+    def self.evaluate_template_function(expression, context, error_behavior)
+      match = expression.match(
+        /\A([a-z_][a-z0-9_]*)\s*\((.*)\)\z/im
+      )
+
+      unless match
+        message = I18n.t(
+          'document_generator.error_function_failed',
+          func: expression,
+          message: I18n.t(
+            'document_generator.error_invalid_template',
+            message: expression
+          )
+        )
+
+        return handle_template_error(
+          message,
+          context,
+          error_behavior
+        )
+      end
+
+      function_name = match[1].downcase
+      arguments = split_function_arguments(match[2])
+
+      # Агрегаты обрабатываются отдельно от функций форматирования.
+      if %w[sum avg min max total_sum total_avg total_min total_max].include?(
+        function_name
+      )
+        return evaluate_aggregate_function(
+          function_name,
+          arguments,
+          context,
+          error_behavior
+        )
+      end
+
+      case function_name
+      when 'date'
+        evaluate_date_function(arguments, context)
+      when 'now'
+        evaluate_now_function(arguments)
+      when 'upper'
+        evaluate_unary_string_function(arguments, context) { |value| value.upcase }
+      when 'lower'
+        evaluate_unary_string_function(arguments, context) { |value| value.downcase }
+      when 'capitalize'
+        evaluate_unary_string_function(arguments, context) { |value| value.capitalize }
+      when 'truncate'
+        evaluate_truncate_function(arguments, context)
+      when 'strip_html'
+        evaluate_unary_string_function(arguments, context) do |value|
+          ActionController::Base.helpers.strip_tags(value)
+        end
+      when 'nl2br'
+        evaluate_unary_string_function(arguments, context) do |value|
+          value.gsub(/\r\n|\r|\n/, '<br>')
+        end
+      when 'replace'
+        evaluate_replace_function(arguments, context)
+      when 'number'
+        evaluate_number_function(arguments, context)
+      when 'default'
+        evaluate_default_function(arguments, context)
+      when 'length'
+        evaluate_unary_string_function(arguments, context) { |value| value.length }
+      when 'concat'
+        evaluate_concat_function(arguments, context)
+      else
+        message = I18n.t(
+          'document_generator.error_function_failed',
+          func: function_name,
+          message: I18n.t(
+            'document_generator.error_invalid_template',
+            message: expression
+          )
+        )
+
+        handle_template_error(
+          message,
+          context,
+          error_behavior
+        )
+      end
+    end
+
+    # Возвращает количество записей текущего контейнера.
+    #
+    # count разрешён только там, где ContextBuilder явно сформировал
+    # соответствующий контейнерный контекст, например в заголовке или
+    # подвале группы.
+    #
+    # @param context [Hash] Текущий контекст.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @return [String] Количество записей.
+    def self.evaluate_count(context, error_behavior)
+      unless context.is_a?(Hash) && context.key?('count')
+        message = I18n.t(
+          'document_generator.error_field_not_found',
+          field: 'count'
+        )
+
+        return handle_template_error(
+          message,
+          context,
+          error_behavior
+        )
+      end
+
+      context['count'].to_i.to_s
+    end
+
+    # Возвращает общее количество основных записей выборки.
+    #
+    # @param context [Hash] Контекст итогового блока.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @return [String] Общее количество записей.
+    def self.evaluate_total_count(context, error_behavior)
+      unless context.is_a?(Hash) && context.key?('total_count')
+        message = I18n.t(
+          'document_generator.error_field_not_found',
+          field: 'total_count'
+        )
+
+        return handle_template_error(
+          message,
+          context,
+          error_behavior
+        )
+      end
+
+      context['total_count'].to_i.to_s
+    end
+
+    # Выполняет функцию, принимающую один аргумент-значение.
+    #
+    # @param arguments [Array<String>] Один аргумент функции.
+    # @param context [Hash] Текущий контекст.
+    # @yield [String] Значение поля для форматирования.
+    # @return [String] Отформатированное значение.
+    def self.evaluate_unary_string_function(arguments, context)
+      return '' if arguments.empty?
+
+      value = resolve_function_value(
+        arguments.first,
+        context
+      )
+
+      value = '' if value.nil?
+
+      result = yield(value.to_s)
+
+      result.to_s
+    end
+
+    # Форматирует дату или время согласно формату шаблона.
+    #
+    # @param arguments [Array<String>] Поле даты и строка формата.
+    # @param context [Hash] Текущий контекст.
+    # @return [String] Отформатированная дата.
+    def self.evaluate_date_function(arguments, context)
+      value = resolve_function_value(
+        arguments[0],
+        context
+      )
+
+      return '' if value.nil?
+
+      format = unquote_function_argument(
+        arguments[1] || "'DD.MM.YYYY'"
+      )
+
+      value = Time.zone.parse(value.to_s) if value.is_a?(String)
+
+      unless value.respond_to?(:strftime)
+        return value.to_s
+      end
+
+      value.strftime(
+        convert_date_format(format)
+      )
+    end
+
+    # Возвращает текущую дату и время в формате шаблона.
+    #
+    # @param arguments [Array<String>] Аргументы функции now.
+    # @return [String] Текущая дата и время.
+    def self.evaluate_now_function(arguments)
+      format = unquote_function_argument(
+        arguments.first || "'DD.MM.YYYY HH:mm'"
+      )
+
+      Time.current.strftime(
+        convert_date_format(format)
+      )
+    end
+
+    # Ограничивает строку заданным количеством символов.
+    #
+    # @param arguments [Array<String>] Значение и максимальная длина.
+    # @param context [Hash] Текущий контекст.
+    # @return [String] Обрезанная строка.
+    def self.evaluate_truncate_function(arguments, context)
+      value = resolve_function_value(
+        arguments[0],
+        context
+      )
+
+      length = arguments[1].to_i
+
+      return '' if value.nil?
+      return value.to_s if length <= 0
+
+      value.to_s.truncate(length)
+    end
+
+    # Заменяет одну подстроку другой.
+    #
+    # @param arguments [Array<String>] Значение, искомая и новая строки.
+    # @param context [Hash] Текущий контекст.
+    # @return [String] Результат замены.
+    def self.evaluate_replace_function(arguments, context)
+      value = resolve_function_value(
+        arguments[0],
+        context
+      )
+
+      old_value = unquote_function_argument(
+        arguments[1] || ''
+      )
+
+      new_value = unquote_function_argument(
+        arguments[2] || ''
+      )
+
+      return '' if value.nil?
+
+      value.to_s.gsub(
+        old_value,
+        new_value
+      )
+    end
+
+    # Форматирует числовое значение с указанным количеством знаков.
+    #
+    # @param arguments [Array<String>] Значение и количество знаков после запятой.
+    # @param context [Hash] Текущий контекст.
+    # @return [String] Отформатированное число.
+    def self.evaluate_number_function(arguments, context)
+      value = resolve_function_value(
+        arguments[0],
+        context
+      )
+
+      return '' if value.nil? || value.to_s.strip.empty?
+
+      precision = arguments[1].to_i
+
+      format(
+        "%.#{precision}f",
+        value.to_f
+      )
+    end
+
+    # Возвращает значение поля либо значение по умолчанию.
+    #
+    # @param arguments [Array<String>] Основное значение и значение по умолчанию.
+    # @param context [Hash] Текущий контекст.
+    # @return [String] Исходное либо резервное значение.
+    def self.evaluate_default_function(arguments, context)
+      value = resolve_function_value(
+        arguments[0],
+        context
+      )
+
+      default_value = unquote_function_argument(
+        arguments[1] || ''
+      )
+
+      if value.nil? || value.to_s.strip.empty?
+        default_value
+      else
+        value.to_s
+      end
+    end
+
+    # Объединяет произвольное количество полей и строковых литералов.
+    #
+    # @param arguments [Array<String>] Значения и строковые литералы.
+    # @param context [Hash] Текущий контекст.
+    # @return [String] Объединённая строка.
+    def self.evaluate_concat_function(arguments, context)
+      arguments.map do |argument|
+        argument = argument.strip
+
+        if quoted_function_argument?(argument)
+          unquote_function_argument(argument)
+        else
+          value = get_context_value(
+            argument,
+            context
+          )
+
+          value.nil? ? '' : value.to_s
+        end
+      end.join
+    end
+
+    # Разрешает аргумент функции как литерал или поле контекста.
+    #
+    # @param argument [String] Аргумент функции.
+    # @param context [Hash] Текущий контекст.
+    # @return [Object, nil] Значение аргумента.
+    def self.resolve_function_value(argument, context)
+      argument = argument.to_s.strip
+
+      return unquote_function_argument(argument) if quoted_function_argument?(argument)
+
+      get_context_value(
+        argument,
+        context
+      )
+    end
+
+    # Проверяет, является ли аргумент строковым литералом.
+    #
+    # @param argument [String] Аргумент функции.
+    # @return [Boolean] true, если аргумент заключён в одинарные или двойные кавычки.
+    def self.quoted_function_argument?(argument)
+      argument.match?(/\A(['"]).*\1\z/m)
+    end
+
+    # Удаляет внешние кавычки строкового аргумента функции.
+    #
+    # @param argument [String] Аргумент функции.
+    # @return [String] Значение без внешних кавычек.
+    def self.unquote_function_argument(argument)
+      value = argument.to_s.strip
+
+      if value.length >= 2 &&
+         ((value.start_with?("'") && value.end_with?("'")) ||
+          (value.start_with?('"') && value.end_with?('"')))
+        value[1...-1]
+      else
+        value
+      end
+    end
+
+    # Преобразует формат даты из синтаксиса шаблона в формат strftime Ruby.
+    #
+    # @param format [String] Формат даты в синтаксисе шаблона.
+    # @return [String] Формат, совместимый с strftime.
+    def self.convert_date_format(format)
+      format.to_s
+        .gsub('YYYY', '%Y')
+        .gsub('YY', '%y')
+        .gsub('MM', '%m')
+        .gsub('DD', '%d')
+        .gsub('HH', '%H')
+        .gsub('mm', '%M')
+        .gsub('SS', '%S')
+    end
+
+    # Проверяет наличие поля в контексте без оценки его значения.
+    #
+    # @param key [String] Имя поля, включая возможный вложенный путь.
+    # @param context [Hash] Текущий контекст.
+    # @return [Boolean] true, если поле существует.
+    def self.context_value_exists?(key, context)
+      parts = key.to_s.split('.')
+
+      current = context
+
+      parts.each do |part|
+        return false unless current.is_a?(Hash) && current.key?(part)
+
+        current = current[part]
+      end
+
+      true
+    end
+
+    # Обрабатывает обращение к отсутствующему полю согласно выбранной стратегии.
+    #
+    # @param field [String] Имя отсутствующего поля.
+    # @param context [Hash] Текущий контекст.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @return [String] Пустая строка при пропуске поля.
+    def self.handle_missing_template_field(field, context, error_behavior)
+      issue = context.is_a?(Hash) ? context['__issue'] : nil
+
+      issue_label =
+        if issue.respond_to?(:id)
+          "##{issue.id} — #{issue.subject}"
+        elsif issue.is_a?(Hash)
+          "##{issue['id']} — #{issue['subject']}"
+        else
+          I18n.t('document_generator.unknown_record')
+        end
+
+      message = I18n.t(
+        'document_generator.error_field_missing',
+        issue: issue_label,
+        field: field
+      )
+
+      handle_template_error(
+        message,
+        context,
+        error_behavior
+      )
+    end
+
+    # Применяет стратегию обработки ошибки шаблона.
+    #
+    # @param message [String] Локализованное сообщение об ошибке.
+    # @param context [Hash] Текущий контекст.
+    # @param error_behavior [String] Стратегия обработки ошибки.
+    # @return [String, nil] Пустое значение при пропуске поля.
+    # @raise [DocumentGenerator::RenderError] При режиме abort.
+    # @raise [DocumentGenerator::SkipRecordError] При режиме skip_record.
+    def self.handle_template_error(message, context, error_behavior)
+      case error_behavior
+      when 'abort'
+        raise DocumentGenerator::RenderError, message
+
+      when 'skip_field'
+        warnings = context.is_a?(Hash) ? context['__warnings'] : nil
+        warnings << message if warnings.is_a?(Array)
+
+        Rails.logger.warn(
+          "[DocumentGenerator] Template field was skipped: #{message}"
+        )
+
+        ''
+
+      when 'skip_record'
+        warnings = context.is_a?(Hash) ? context['__warnings'] : nil
+        warnings << message if warnings.is_a?(Array)
+
+        raise DocumentGenerator::SkipRecordError, message
+
+      else
+        raise DocumentGenerator::RenderError, message
+      end
+    end
+
+    # Получает предварительно рассчитанное агрегатное значение из контекста.
+    #
+    # @param function_name [String] Имя агрегата.
+    # @param arguments [Array<String>] Аргументы функции.
+    # @param context [Hash] Контекст текущей записи или группы.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @return [String] Значение агрегата.
+    def self.evaluate_aggregate_function(function_name, arguments, context, error_behavior)
+      unless arguments.length == 1 && !arguments.first.to_s.strip.empty?
+        message = I18n.t(
+          'document_generator.error_function_failed',
+          func: function_name,
+          message: I18n.t(
+            'document_generator.error_invalid_template',
+            message: function_name
+          )
+        )
+
+        return handle_template_error(
+          message,
+          context,
+          error_behavior
+        )
+      end
+
+      field_name = arguments.first.strip
+      is_total = function_name.start_with?('total_')
+      aggregate_name = function_name.sub(/\Atotal_/, '')
+
+      # Общие агрегаты используют total_agg_.
+      # Вложенная группа второго уровня использует group_2_agg_.
+      # Первая группа использует group_agg_.
+      prefix =
+        if is_total
+          'total_agg_'
+        elsif context.key?('GroupValue2')
+          'group_2_agg_'
+        else
+          'group_agg_'
+        end
+
+      key = "#{prefix}#{aggregate_name}_#{field_name}"
+
+      unless context.key?(key)
+        message = I18n.t(
+          'document_generator.error_unknown_field_in_function',
+          field: field_name
+        )
+
+        return handle_template_error(
+          message,
+          context,
+          error_behavior
+        )
+      end
+
+      value = context[key]
+
+      value.nil? ? '' : value.to_s
+    end
+
     # ==========================================================================
     # ВЫЧИСЛЕНИЕ УСЛОВИЯ
     # ==========================================================================
@@ -673,27 +1559,28 @@ module DocumentGenerator
       end
     end
 
-    # ==========================================================================
-    # ПОЛУЧЕНИЕ ЗНАЧЕНИЯ ИЗ КОНТЕКСТА
-    # ==========================================================================
-    # Получает значение из контекста по ключу
+    # Получает значение из текущего контекста по имени поля.
     #
-    # @param key [String] Ключ (поддерживает вложенность через точку)
-    # @param context [Hash] Контекст данных
-    # @return [Object, nil] Значение или nil
+    # Поддерживает вложенные ключи через точку:
+    # Parent.Тема, Subtask.Тема, Watcher.Имя и Relation.Тема.
+    #
+    # @param key [String] Имя поля или вложенного значения.
+    # @param context [Hash] Текущий контекст.
+    # @return [Object, nil] Найденное значение.
     def self.get_context_value(key, context)
       return nil if key.blank? || context.nil?
+
       if key.include?('.')
         parts = key.split('.')
-        parts.inject(context) { |h, k| h.is_a?(Hash) ? h[k] : nil }
+
+        parts.inject(context) do |current, part|
+          current.is_a?(Hash) ? current[part] : nil
+        end
       else
         context[key]
       end
     end
 
-    # ==========================================================================
-    # ОЧИСТКА УПРАВЛЯЮЩИХ МАРКЕРОВ
-    # ==========================================================================
     # Удаляет управляющие команды из текста после их обработки.
     #
     # @param text [String] Текст XML-узла.
@@ -711,19 +1598,12 @@ module DocumentGenerator
           END_WATCHERS|
           BEGIN_RELATIONS(?:\s*:\s*[^%]+)?|
           END_RELATIONS|
-          BEGIN_GROUP_HEADER|
-          END_GROUP_HEADER|
-          BEGIN_GROUP_HEADER_2|
-          END_GROUP_HEADER_2|
-          BEGIN_GROUP_FOOTER|
-          END_GROUP_FOOTER|
-          BEGIN_GROUP_FOOTER_2|
-          END_GROUP_FOOTER_2|
+          GROUP_BY(?:_2)?\s*:\s*[^%]+|
+          GROUP_HEADER(?:_2)?|
+          GROUP_FOOTER(?:_2)?|
           BEGIN_TOTAL|
           END_TOTAL|
-          GROUP_BY|
-          GROUP_BY_2|
-          IF|
+          IF(?:\s*\([^%]*\))?|
           ELSE|
           END
         )\s*%>/ix,
@@ -1118,4 +1998,4 @@ module DocumentGenerator
 
   end
 end
-# v2610051132
+# v2610061505
