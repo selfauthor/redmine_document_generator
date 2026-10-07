@@ -65,6 +65,10 @@ class DocumentGeneratorController < ApplicationController
   # Генерирует документ или ZIP-архив и возвращает ссылку на защищённое скачивание.
   # @return [void]
   def export
+    # Сбрасываем кэш разрешения полей перед каждой генерацией,
+    # чтобы изменения пользовательских полей Redmine сразу учитывались.
+    DocumentGenerator::FieldResolver.reset_cache!
+
     @template_file = params[:template_file]
     @export_mode = params[:export_mode]
     @file_name = params[:file_name].to_s.strip
@@ -89,21 +93,21 @@ class DocumentGeneratorController < ApplicationController
       return render_export_error(I18n.t('document_generator.error_no_records'))
     end
 
-    # Загружаем шаблон существующим способом, не изменяя процедуру его получения.
-    temp_template_path = save_uploaded_template(@template_file)
-
     # Создаём уникальную папку для промежуточных и итоговых файлов текущей операции.
     export_uuid = SecureRandom.uuid
     export_dir = File.join(export_root_dir, export_uuid)
     FileUtils.mkdir_p(export_dir)
 
     begin
+      # Сохраняем загруженный шаблон внутри блока обработки ошибок,
+      # чтобы ошибка превышения допустимого размера корректно возвращалась пользователю.
+      temp_template_path = save_uploaded_template(@template_file)
+
       parser = DocumentGenerator::TemplateParser.new(temp_template_path)
       config = parser.parse
 
       if @export_mode == 'single'
         # Генерируем отдельные документы и помещаем их в ZIP с исходными именами.
-        ext = File.extname(temp_template_path).downcase
         output_path = File.join(export_dir, "#{export_uuid}.zip")
         generate_single_mode_archive(temp_template_path, config, output_path, export_dir)
         download_filename = "#{@file_name}.zip"
@@ -240,7 +244,7 @@ class DocumentGeneratorController < ApplicationController
   # Проверяет наличие библиотек, необходимых для генерации документов.
   # При AJAX-запросе возвращает ошибку в JSON, при обычном запросе использует redirect.
   def check_gems_loaded
-    return if defined?(DOCUMENT_GENERATOR_GEMS_LOADED) && DOCUMENT_GENERATOR_GEMS_LOADED
+    return if defined?(::DOCUMENT_GENERATOR_GEMS_LOADED) && ::DOCUMENT_GENERATOR_GEMS_LOADED
 
     message = I18n.t('error_gems_not_loaded')
 
@@ -255,11 +259,51 @@ class DocumentGeneratorController < ApplicationController
     end
   end
 
+  # Сохраняет загруженный пользователем шаблон во временный каталог.
+  #
+  # @param uploaded_file [ActionDispatch::Http::UploadedFile] Загруженный файл шаблона.
+  # @return [String] Полный путь к сохранённому временному файлу.
+  # @raise [DocumentGenerator::TemplateError] Если размер файла превышает допустимый размер вложения.
   def save_uploaded_template(uploaded_file)
+    # Получаем максимально допустимый размер файла из глобальной настройки Redmine.
+    # Setting.attachment_max_size хранит значение в килобайтах.
+    max_size_kb = Setting.attachment_max_size.to_i
+    max_size_bytes = max_size_kb.kilobytes
+
+    # Проверяем размер до записи файла во временный каталог.
+    # Это позволяет отклонить слишком большой файл до его полного чтения и обработки.
+    if uploaded_file.size.to_i > max_size_bytes
+      raise DocumentGenerator::TemplateError,
+            I18n.t(
+              'document_generator.error_template_too_big',
+              max_size: max_size_kb
+            )
+    end
+
+    # Создаём отдельный временный каталог для шаблона.
     temp_dir = Dir.mktmpdir
-    temp_path = File.join(temp_dir, uploaded_file.original_filename)
-    File.open(temp_path, 'wb') { |f| f.write(uploaded_file.read) }
-    temp_path
+
+    # Используем только имя файла без возможного пути, переданного клиентом.
+    temp_path = File.join(
+      temp_dir,
+      File.basename(uploaded_file.original_filename.to_s)
+    )
+
+    begin
+      # Перемещаем указатель временного файла в начало перед копированием.
+      uploaded_file.tempfile.rewind
+
+      # Копируем файл потоком, не загружая всё его содержимое в память Ruby.
+      File.open(temp_path, 'wb') do |file|
+        IO.copy_stream(uploaded_file.tempfile, file)
+      end
+
+      temp_path
+    rescue StandardError
+      # Если сохранение не удалось, удаляем временный каталог целиком.
+      FileUtils.rm_rf(temp_dir)
+      raise
+    end
   end
 
 
@@ -294,7 +338,6 @@ class DocumentGeneratorController < ApplicationController
   # @param export_dir [String] Папка текущей операции для промежуточных файлов.
   # @return [String] Путь к созданному ZIP-архиву.
   def generate_single_mode_archive(template_path, config, archive_path, export_dir)
-    require 'zip'
 
     ext = File.extname(template_path).downcase
     intermediate_paths = []
@@ -308,7 +351,7 @@ class DocumentGeneratorController < ApplicationController
         @render_warnings.concat(renderer.warnings || [])
 
         # Используем пользовательское имя файла с добавлением ID задачи.
-        filename_in_zip = "#{@file_name}_#{issue.id}#{ext}"
+        filename_in_zip = "#{@file_name}#{issue.id}#{ext}"
         file_path = File.join(export_dir, filename_in_zip)
 
         if result.is_a?(String) && File.file?(result)
@@ -421,4 +464,4 @@ class DocumentGeneratorController < ApplicationController
   end
 
 end
-# v2610011632
+# v2610071038

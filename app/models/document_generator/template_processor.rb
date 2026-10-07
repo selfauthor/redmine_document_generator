@@ -282,19 +282,26 @@ module DocumentGenerator
   #
   # Внутри доступны значения и агрегаты соответствующей группы второго уровня.
   #
+  # Строки после GROUP_FOOTER_2 и до GROUP_FOOTER повторяются для каждой
+  # группы второго уровня.
   #
-  # 13. ИТОГ ГРУППЫ
-  # ===============
+  #
+  # 13. ИТОГ ГРУППЫ ПЕРВОГО УРОВНЯ
+  # ================================
   #
   # <%GROUP_FOOTER%>
   #
-  #   Обязательный завершающий блок при использовании любой группировки.
+  #   Обязательный маркер начала повторяемого подвала внешней группы.
   #
-  # GROUP_FOOTER закрывает все уровни текущей группировки.
+  # Строки после GROUP_FOOTER и до END_GROUPS повторяются для каждой
+  # группы первого уровня.
   #
-  # Если используется GROUP_BY или GROUP_BY_2, наличие GROUP_FOOTER обязательно.
+  # <%END_GROUPS%>
   #
-  # После GROUP_FOOTER разрешён произвольный статический текст.
+  #   Обязательный маркер конца всей повторяемой области группировки.
+  #
+  # Всё после END_GROUPS является обычным продолжением документа и
+  # выводится один раз, а не повторяется для каждой группы.
   #
   #
   # 14. ОБЩИЕ ИТОГИ
@@ -458,7 +465,7 @@ module DocumentGenerator
   # Любой текст, не заключённый в <% ... %>, считается обычным текстом
   # шаблона и переносится в результирующий документ без обработки.
   #
-  # После <%GROUP_FOOTER%> разрешён произвольный статический текст.
+  # После <%END_GROUPS%> разрешён обычный статический текст документа.
   #
   #
   # 20. ОГРАНИЧЕНИЯ И ПРАВИЛА
@@ -468,8 +475,12 @@ module DocumentGenerator
   #   с таким же названием.
   # - GROUP_BY_2 используется только вместе с GROUP_BY.
   # - При наличии GROUP_BY или GROUP_BY_2 GROUP_FOOTER обязателен.
-  # - GROUP_FOOTER закрывает все уровни группировки.
+  # - END_GROUPS обязателен и используется ровно один раз.
   # - GROUP_FOOTER_2 является необязательным.
+  # - GROUP_FOOTER_2 закрывает внутренний подвал группы второго уровня.
+  # - GROUP_FOOTER закрывает подвал группы первого уровня.
+  # - END_GROUPS закрывает всю повторяемую область группировки.
+  # - Текст после END_GROUPS не повторяется вместе с группами.
   # - count допустим только в контексте группы.
   # - total_count относится ко всей выборке.
   # - row_number относится только к основным записям.
@@ -1364,7 +1375,9 @@ module DocumentGenerator
         .gsub('SS', '%S')
     end
 
-    # Проверяет наличие поля в контексте без оценки его значения.
+    # Проверяет наличие поля в контексте без учёта регистра.
+    #
+    # Поддерживает вложенные пути через точку.
     #
     # @param key [String] Имя поля, включая возможный вложенный путь.
     # @param context [Hash] Текущий контекст.
@@ -1375,9 +1388,13 @@ module DocumentGenerator
       current = context
 
       parts.each do |part|
-        return false unless current.is_a?(Hash) && current.key?(part)
+        return false unless current.is_a?(Hash)
 
-        current = current[part]
+        normalized_part = part.to_s.downcase
+
+        return false unless current.key?(normalized_part)
+
+        current = current[normalized_part]
       end
 
       true
@@ -1559,10 +1576,14 @@ module DocumentGenerator
       end
     end
 
-    # Получает значение из текущего контекста по имени поля.
+    # Получает значение из текущего контекста по имени поля без учёта регистра.
     #
     # Поддерживает вложенные ключи через точку:
     # Parent.Тема, Subtask.Тема, Watcher.Имя и Relation.Тема.
+    #
+    # Имена полей приводятся к нижнему регистру перед обращением к контексту.
+    # Управляющие конструкции сюда не попадают, поскольку они обрабатываются
+    # отдельными участками шаблонизатора до вызова этого метода.
     #
     # @param key [String] Имя поля или вложенного значения.
     # @param context [Hash] Текущий контекст.
@@ -1570,14 +1591,14 @@ module DocumentGenerator
     def self.get_context_value(key, context)
       return nil if key.blank? || context.nil?
 
-      if key.include?('.')
-        parts = key.split('.')
+      parts = key.to_s.split('.')
 
-        parts.inject(context) do |current, part|
-          current.is_a?(Hash) ? current[part] : nil
+      parts.inject(context) do |current, part|
+        if current.is_a?(Hash)
+          current[part.to_s.downcase]
+        else
+          nil
         end
-      else
-        context[key]
       end
     end
 
@@ -1601,6 +1622,7 @@ module DocumentGenerator
           GROUP_BY(?:_2)?\s*:\s*[^%]+|
           GROUP_HEADER(?:_2)?|
           GROUP_FOOTER(?:_2)?|
+          END_GROUPS|
           BEGIN_TOTAL|
           END_TOTAL|
           IF(?:\s*\([^%]*\))?|
@@ -1998,4 +2020,4 @@ module DocumentGenerator
 
   end
 end
-# v2610061505
+# v2610071237

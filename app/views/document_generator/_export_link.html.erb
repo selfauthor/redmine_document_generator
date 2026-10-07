@@ -13,6 +13,7 @@
       <%= link_to sprite_icon('file', l(:label_document_generator)),
                   document_generator_dialog_path(@project, request.query_parameters),
                   remote: true,
+                  data: { turbo: false },
                   class: 'icon icon-file' %>
     </span>
   <% end %>

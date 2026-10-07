@@ -2,52 +2,52 @@
 
 module DocumentGenerator
   # ============================================================================
-  # РЕНДЕРИНГ EXCEL-ДОКУМЕНТОВ
+  # Р Р•РќР”Р•Р РРќР“ EXCEL-Р”РћРљРЈРњР•РќРўРћР’
   # ============================================================================
-  # Класс отвечает за генерацию Excel-документов (.xlsx) из шаблонов.
-  # Обрабатывает группировку, агрегатные функции, циклы по строкам.
+  # РљР»Р°СЃСЃ РѕС‚РІРµС‡Р°РµС‚ Р·Р° РіРµРЅРµСЂР°С†РёСЋ Excel-РґРѕРєСѓРјРµРЅС‚РѕРІ (.xlsx) РёР· С€Р°Р±Р»РѕРЅРѕРІ.
+  # РћР±СЂР°Р±Р°С‚С‹РІР°РµС‚ РіСЂСѓРїРїРёСЂРѕРІРєСѓ, Р°РіСЂРµРіР°С‚РЅС‹Рµ С„СѓРЅРєС†РёРё, С†РёРєР»С‹ РїРѕ СЃС‚СЂРѕРєР°Рј.
   
   class ExcelRenderer
-    # Возвращает предупреждения, накопленные при формировании документа.
-    # @return [Array<String>] Список предупреждений для пользователя.
+    # Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ, РЅР°РєРѕРїР»РµРЅРЅС‹Рµ РїСЂРё С„РѕСЂРјРёСЂРѕРІР°РЅРёРё РґРѕРєСѓРјРµРЅС‚Р°.
+    # @return [Array<String>] РЎРїРёСЃРѕРє РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№ РґР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.
     attr_reader :warnings
 
-    # Инициализация рендерера
+    # РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ СЂРµРЅРґРµСЂРµСЂР°
     #
-    # @param template_path [String] Путь к файлу шаблона
-    # @param issues [Array<Issue>] Массив задач для выгрузки
-    # @param parser_config [Hash] Конфигурация парсера (настройки блоков)
-    # @param error_behavior [String] Поведение при ошибках: 'abort', 'skip_field', 'skip_record'
+    # @param template_path [String] РџСѓС‚СЊ Рє С„Р°Р№Р»Сѓ С€Р°Р±Р»РѕРЅР°
+    # @param issues [Array<Issue>] РњР°СЃСЃРёРІ Р·Р°РґР°С‡ РґР»СЏ РІС‹РіСЂСѓР·РєРё
+    # @param parser_config [Hash] РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ РїР°СЂСЃРµСЂР° (РЅР°СЃС‚СЂРѕР№РєРё Р±Р»РѕРєРѕРІ)
+    # @param error_behavior [String] РџРѕРІРµРґРµРЅРёРµ РїСЂРё РѕС€РёР±РєР°С…: 'abort', 'skip_field', 'skip_record'
     def initialize(template_path, issues, parser_config, error_behavior)
       @template_path = template_path
       @issues = issues
       @parser_config = parser_config
       @error_behavior = error_behavior
 
-      # Создаём массив для предупреждений текущей выгрузки.
+      # РЎРѕР·РґР°С‘Рј РјР°СЃСЃРёРІ РґР»СЏ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№ С‚РµРєСѓС‰РµР№ РІС‹РіСЂСѓР·РєРё.
       @warnings = []
     end
 
-    # Генерирует Excel-документ из шаблона.
+    # Р“РµРЅРµСЂРёСЂСѓРµС‚ Excel-РґРѕРєСѓРјРµРЅС‚ РёР· С€Р°Р±Р»РѕРЅР°.
     #
-    # @return [String] Путь к сгенерированному XLSX-файлу.
-    # @raise [RenderError] Если во время рендеринга произошла ошибка.
+    # @return [String] РџСѓС‚СЊ Рє СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅРѕРјСѓ XLSX-С„Р°Р№Р»Сѓ.
+    # @raise [RenderError] Р•СЃР»Рё РІРѕ РІСЂРµРјСЏ СЂРµРЅРґРµСЂРёРЅРіР° РїСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°.
     def render
-      # Формируем общий контекст данных для всех записей выгрузки.
+      # Р¤РѕСЂРјРёСЂСѓРµРј РѕР±С‰РёР№ РєРѕРЅС‚РµРєСЃС‚ РґР°РЅРЅС‹С… РґР»СЏ РІСЃРµС… Р·Р°РїРёСЃРµР№ РІС‹РіСЂСѓР·РєРё.
       context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
 
-      # Используем предупреждения, сформированные ContextBuilder.
+      # РСЃРїРѕР»СЊР·СѓРµРј РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ, СЃС„РѕСЂРјРёСЂРѕРІР°РЅРЅС‹Рµ ContextBuilder.
       @warnings = context['__warnings'] || @warnings
 
-      # Формируем путь к результирующему XLSX-файлу.
+      # Р¤РѕСЂРјРёСЂСѓРµРј РїСѓС‚СЊ Рє СЂРµР·СѓР»СЊС‚РёСЂСѓСЋС‰РµРјСѓ XLSX-С„Р°Р№Р»Сѓ.
       output_path = "#{@template_path}.output.xlsx"
 
-      # Определяем XML-файлы листов Excel, которые требуется обработать.
+      # РћРїСЂРµРґРµР»СЏРµРј XML-С„Р°Р№Р»С‹ Р»РёСЃС‚РѕРІ Excel, РєРѕС‚РѕСЂС‹Рµ С‚СЂРµР±СѓРµС‚СЃСЏ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ.
       xml_targets = ['xl/worksheets/sheet*.xml']
 
-      # Читаем sharedStrings.xml один раз до обработки листов.
-      # Это необходимо, поскольку Excel часто хранит текстовые значения
-      # ячеек не непосредственно в worksheet XML, а по индексу общей строки.
+      # Р§РёС‚Р°РµРј sharedStrings.xml РѕРґРёРЅ СЂР°Р· РґРѕ РѕР±СЂР°Р±РѕС‚РєРё Р»РёСЃС‚РѕРІ.
+      # Р­С‚Рѕ РЅРµРѕР±С…РѕРґРёРјРѕ, РїРѕСЃРєРѕР»СЊРєСѓ Excel С‡Р°СЃС‚Рѕ С…СЂР°РЅРёС‚ С‚РµРєСЃС‚РѕРІС‹Рµ Р·РЅР°С‡РµРЅРёСЏ
+      # СЏС‡РµРµРє РЅРµ РЅРµРїРѕСЃСЂРµРґСЃС‚РІРµРЅРЅРѕ РІ worksheet XML, Р° РїРѕ РёРЅРґРµРєСЃСѓ РѕР±С‰РµР№ СЃС‚СЂРѕРєРё.
       shared_strings = []
 
       Zip::File.open(@template_path) do |zip_file|
@@ -58,8 +58,8 @@ module DocumentGenerator
             zip_file.read('xl/sharedStrings.xml')
           )
 
-          # Извлекаем текст каждого элемента <si>.
-          # Если строка состоит из нескольких <t>, объединяем их в одно значение.
+          # РР·РІР»РµРєР°РµРј С‚РµРєСЃС‚ РєР°Р¶РґРѕРіРѕ СЌР»РµРјРµРЅС‚Р° <si>.
+          # Р•СЃР»Рё СЃС‚СЂРѕРєР° СЃРѕСЃС‚РѕРёС‚ РёР· РЅРµСЃРєРѕР»СЊРєРёС… <t>, РѕР±СЉРµРґРёРЅСЏРµРј РёС… РІ РѕРґРЅРѕ Р·РЅР°С‡РµРЅРёРµ.
           shared_strings = shared_strings_doc.xpath(
             "//*[local-name()='si']"
           ).map do |string_item|
@@ -68,7 +68,7 @@ module DocumentGenerator
         end
       end
 
-      # Обрабатываем XML-файлы листов внутри XLSX-архива.
+      # РћР±СЂР°Р±Р°С‚С‹РІР°РµРј XML-С„Р°Р№Р»С‹ Р»РёСЃС‚РѕРІ РІРЅСѓС‚СЂРё XLSX-Р°СЂС…РёРІР°.
       TemplateProcessor.process_archive(
         @template_path,
         output_path,
@@ -84,12 +84,12 @@ module DocumentGenerator
 
       output_path
     rescue StandardError => e
-      # Записываем техническую информацию в журнал для диагностики ошибки.
+      # Р—Р°РїРёСЃС‹РІР°РµРј С‚РµС…РЅРёС‡РµСЃРєСѓСЋ РёРЅС„РѕСЂРјР°С†РёСЋ РІ Р¶СѓСЂРЅР°Р» РґР»СЏ РґРёР°РіРЅРѕСЃС‚РёРєРё РѕС€РёР±РєРё.
       Rails.logger.error(
         "[DocumentGenerator] Excel render failed: #{e.message}\n#{e.backtrace&.join("\n")}"
       )
 
-      # Формируем локализованное сообщение для пользователя.
+      # Р¤РѕСЂРјРёСЂСѓРµРј Р»РѕРєР°Р»РёР·РѕРІР°РЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РґР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.
       error_msg = I18n.t(
         'document_generator.error_excel_render_failed',
         message: e.message
@@ -100,20 +100,20 @@ module DocumentGenerator
 
     private
 
-    # Обрабатывает XML отдельного листа Excel.
+    # РћР±СЂР°Р±Р°С‚С‹РІР°РµС‚ XML РѕС‚РґРµР»СЊРЅРѕРіРѕ Р»РёСЃС‚Р° Excel.
     #
-    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
-    # @param context [Hash] Общий контекст данных выгрузки.
-    # @param entry_name [String] Имя XML-файла листа внутри XLSX-архива.
-    # @param shared_strings [Array<String>] Значения из sharedStrings.xml.
+    # @param doc [Nokogiri::XML::Document] XML-РґРѕРєСѓРјРµРЅС‚ Р»РёСЃС‚Р° Excel.
+    # @param context [Hash] РћР±С‰РёР№ РєРѕРЅС‚РµРєСЃС‚ РґР°РЅРЅС‹С… РІС‹РіСЂСѓР·РєРё.
+    # @param entry_name [String] РРјСЏ XML-С„Р°Р№Р»Р° Р»РёСЃС‚Р° РІРЅСѓС‚СЂРё XLSX-Р°СЂС…РёРІР°.
+    # @param shared_strings [Array<String>] Р—РЅР°С‡РµРЅРёСЏ РёР· sharedStrings.xml.
     # @return [void]
     def process_excel_xml(doc, context, entry_name, shared_strings)
       ns = {
         'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
       }
 
-      # Преобразуем shared strings в inlineStr, чтобы дальнейшая обработка
-      # маркеров работала непосредственно с текстом ячеек.
+      # РџСЂРµРѕР±СЂР°Р·СѓРµРј shared strings РІ inlineStr, С‡С‚РѕР±С‹ РґР°Р»СЊРЅРµР№С€Р°СЏ РѕР±СЂР°Р±РѕС‚РєР°
+      # РјР°СЂРєРµСЂРѕРІ СЂР°Р±РѕС‚Р°Р»Р° РЅРµРїРѕСЃСЂРµРґСЃС‚РІРµРЅРЅРѕ СЃ С‚РµРєСЃС‚РѕРј СЏС‡РµРµРє.
       convert_shared_strings(doc, shared_strings, ns)
 
       process_excel_total_blocks(
@@ -122,8 +122,8 @@ module DocumentGenerator
         ns
       )
 
-      # При наличии групп используется отдельный механизм разворачивания
-      # первого и второго уровней группировки.
+      # РџСЂРё РЅР°Р»РёС‡РёРё РіСЂСѓРїРї РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РѕС‚РґРµР»СЊРЅС‹Р№ РјРµС…Р°РЅРёР·Рј СЂР°Р·РІРѕСЂР°С‡РёРІР°РЅРёСЏ
+      # РїРµСЂРІРѕРіРѕ Рё РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅРµР№ РіСЂСѓРїРїРёСЂРѕРІРєРё.
       if context['groups']
         process_excel_grouped_blocks(
           doc,
@@ -133,8 +133,8 @@ module DocumentGenerator
       else
         records = context['records'] || []
 
-        # Обычный режим без группировки: BEGIN_ROW/END_ROW повторяется
-        # для каждой основной записи.
+        # РћР±С‹С‡РЅС‹Р№ СЂРµР¶РёРј Р±РµР· РіСЂСѓРїРїРёСЂРѕРІРєРё: BEGIN_ROW/END_ROW РїРѕРІС‚РѕСЂСЏРµС‚СЃСЏ
+        # РґР»СЏ РєР°Р¶РґРѕР№ РѕСЃРЅРѕРІРЅРѕР№ Р·Р°РїРёСЃРё.
         process_excel_row_blocks(
           doc,
           context,
@@ -142,8 +142,8 @@ module DocumentGenerator
           ns
         )
 
-        # После разворачивания циклических блоков обрабатываем оставшиеся
-        # статические строки, условия и обычные маркеры.
+        # РџРѕСЃР»Рµ СЂР°Р·РІРѕСЂР°С‡РёРІР°РЅРёСЏ С†РёРєР»РёС‡РµСЃРєРёС… Р±Р»РѕРєРѕРІ РѕР±СЂР°Р±Р°С‚С‹РІР°РµРј РѕСЃС‚Р°РІС€РёРµСЃСЏ
+        # СЃС‚Р°С‚РёС‡РµСЃРєРёРµ СЃС‚СЂРѕРєРё, СѓСЃР»РѕРІРёСЏ Рё РѕР±С‹С‡РЅС‹Рµ РјР°СЂРєРµСЂС‹.
         doc.xpath('//xmlns:row', ns).each do |row|
           TemplateProcessor.process_collection_blocks(
             row,
@@ -168,14 +168,14 @@ module DocumentGenerator
         end
       end
 
-      # После удаления и вставки строк Excel должен получить непрерывную
-      # нумерацию строк и корректные адреса ячеек.
+      # РџРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ Рё РІСЃС‚Р°РІРєРё СЃС‚СЂРѕРє Excel РґРѕР»Р¶РµРЅ РїРѕР»СѓС‡РёС‚СЊ РЅРµРїСЂРµСЂС‹РІРЅСѓСЋ
+      # РЅСѓРјРµСЂР°С†РёСЋ СЃС‚СЂРѕРє Рё РєРѕСЂСЂРµРєС‚РЅС‹Рµ Р°РґСЂРµСЃР° СЏС‡РµРµРє.
       reindex_excel_rows(doc, ns)
     end
 
-    # Обработка ошибок
+    # РћР±СЂР°Р±РѕС‚РєР° РѕС€РёР±РѕРє
     #
-    # @param message [String] Сообщение об ошибке
+    # @param message [String] РЎРѕРѕР±С‰РµРЅРёРµ РѕР± РѕС€РёР±РєРµ
     # @raise [RenderError]
     def handle_error(message)
       case @error_behavior
@@ -190,22 +190,22 @@ module DocumentGenerator
       end
     end
 
-    # Преобразует ячейки Excel, использующие sharedStrings.xml,
-    # в inlineStr с непосредственным текстом.
+    # РџСЂРµРѕР±СЂР°Р·СѓРµС‚ СЏС‡РµР№РєРё Excel, РёСЃРїРѕР»СЊР·СѓСЋС‰РёРµ sharedStrings.xml,
+    # РІ inlineStr СЃ РЅРµРїРѕСЃСЂРµРґСЃС‚РІРµРЅРЅС‹Рј С‚РµРєСЃС‚РѕРј.
     #
-    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
-    # @param shared_strings [Array<String>] Значения общей таблицы строк Excel.
-    # @param ns [Hash] Пространства имён XML.
+    # @param doc [Nokogiri::XML::Document] XML-РґРѕРєСѓРјРµРЅС‚ Р»РёСЃС‚Р° Excel.
+    # @param shared_strings [Array<String>] Р—РЅР°С‡РµРЅРёСЏ РѕР±С‰РµР№ С‚Р°Р±Р»РёС†С‹ СЃС‚СЂРѕРє Excel.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјС‘РЅ XML.
     # @return [void]
     def convert_shared_strings(doc, shared_strings, ns)
-      # Находим только ячейки, которые используют shared string.
+      # РќР°С…РѕРґРёРј С‚РѕР»СЊРєРѕ СЏС‡РµР№РєРё, РєРѕС‚РѕСЂС‹Рµ РёСЃРїРѕР»СЊР·СѓСЋС‚ shared string.
       doc.xpath('//xmlns:c[@t="s"]', ns).each do |cell|
         value_node = cell.at_xpath('xmlns:v', ns)
 
-        # Ячейка без индекса общей строки не может быть преобразована.
+        # РЇС‡РµР№РєР° Р±РµР· РёРЅРґРµРєСЃР° РѕР±С‰РµР№ СЃС‚СЂРѕРєРё РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅР°.
         next unless value_node
 
-        # Безопасно преобразуем значение <v> в индекс sharedStrings.xml.
+        # Р‘РµР·РѕРїР°СЃРЅРѕ РїСЂРµРѕР±СЂР°Р·СѓРµРј Р·РЅР°С‡РµРЅРёРµ <v> РІ РёРЅРґРµРєСЃ sharedStrings.xml.
         string_index = begin
           Integer(value_node.text, 10)
         rescue ArgumentError, TypeError
@@ -216,14 +216,14 @@ module DocumentGenerator
         next if string_index.negative?
         next if string_index >= shared_strings.length
 
-        # Создаём inline string <is>.
+        # РЎРѕР·РґР°С‘Рј inline string <is>.
         inline_string = Nokogiri::XML::Node.new(
           'is',
           doc
         )
         inline_string.namespace = cell.namespace
 
-        # Создаём непосредственный текстовый узел <t>.
+        # РЎРѕР·РґР°С‘Рј РЅРµРїРѕСЃСЂРµРґСЃС‚РІРµРЅРЅС‹Р№ С‚РµРєСЃС‚РѕРІС‹Р№ СѓР·РµР» <t>.
         text_node = Nokogiri::XML::Node.new(
           't',
           doc
@@ -231,43 +231,62 @@ module DocumentGenerator
         text_node.namespace = cell.namespace
         text_node.content = shared_strings[string_index]
 
-        # Сохраняем начальные и конечные пробелы текста.
+        # РЎРѕС…СЂР°РЅСЏРµРј РЅР°С‡Р°Р»СЊРЅС‹Рµ Рё РєРѕРЅРµС‡РЅС‹Рµ РїСЂРѕР±РµР»С‹ С‚РµРєСЃС‚Р°.
         if text_node.content.match?(/\A\s|\s\z/)
           text_node['xml:space'] = 'preserve'
         end
 
         inline_string.add_child(text_node)
 
-        # Удаляем числовой индекс shared string.
+        # РЈРґР°Р»СЏРµРј С‡РёСЃР»РѕРІРѕР№ РёРЅРґРµРєСЃ shared string.
         value_node.remove
 
-        # Меняем тип ячейки на inlineStr.
+        # РњРµРЅСЏРµРј С‚РёРї СЏС‡РµР№РєРё РЅР° inlineStr.
         cell['t'] = 'inlineStr'
 
-        # Добавляем непосредственное текстовое содержимое.
+        # Р”РѕР±Р°РІР»СЏРµРј РЅРµРїРѕСЃСЂРµРґСЃС‚РІРµРЅРЅРѕРµ С‚РµРєСЃС‚РѕРІРѕРµ СЃРѕРґРµСЂР¶РёРјРѕРµ.
         cell.add_child(inline_string)
       end
     end
 
-    # Разворачивает Excel-шаблон с группировкой первого и второго уровней.
+    # Р Р°Р·РІРѕСЂР°С‡РёРІР°РµС‚ Excel-С€Р°Р±Р»РѕРЅ СЃ РіСЂСѓРїРїРёСЂРѕРІРєРѕР№ РїРµСЂРІРѕРіРѕ Рё РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅРµР№.
     #
-    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
-    # @param context [Hash] Контекст с группами и агрегатами.
-    # @param ns [Hash] Пространства имён XML.
+    # @param doc [Nokogiri::XML::Document] XML-РґРѕРєСѓРјРµРЅС‚ Р»РёСЃС‚Р° Excel.
+    # @param context [Hash] РљРѕРЅС‚РµРєСЃС‚ СЃ РіСЂСѓРїРїР°РјРё Рё Р°РіСЂРµРіР°С‚Р°РјРё.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјС‘РЅ XML.
     # @return [void]
     def process_excel_grouped_blocks(doc, context, ns)
       rows = doc.xpath('//xmlns:row', ns).to_a
       groups = context['groups'] || []
 
+      # РќР°С…РѕРґРёРј РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ СѓРїСЂР°РІР»СЏСЋС‰РёРµ РјР°СЂРєРµСЂС‹ РІСЃРµР№ РѕР±Р»Р°СЃС‚Рё РіСЂСѓРїРїРёСЂРѕРІРєРё.
       footer_index = rows.index do |row|
         excel_row_text(row, ns).match?(
           /\A\s*<%\s*GROUP_FOOTER\s*%>\s*\z/i
         )
       end
 
+      end_groups_index = rows.index do |row|
+        excel_row_text(row, ns).match?(
+          /\A\s*<%\s*END_GROUPS\s*%>\s*\z/i
+        )
+      end
+
       unless footer_index
         raise DocumentGenerator::TemplateError,
               I18n.t('document_generator.error_missing_group_footer')
+      end
+
+      unless end_groups_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_missing_end_groups')
+      end
+
+      # END_GROUPS РґРѕР»Р¶РµРЅ РЅР°С…РѕРґРёС‚СЊСЃСЏ РїРѕСЃР»Рµ GROUP_FOOTER, РїРѕСЃРєРѕР»СЊРєСѓ РёРјРµРЅРЅРѕ
+      # РѕРЅ Р·Р°РєСЂС‹РІР°РµС‚ РІСЃСЋ РїРѕРІС‚РѕСЂСЏРµРјСѓСЋ РѕР±Р»Р°СЃС‚СЊ РІРЅРµС€РЅРµР№ РіСЂСѓРїРїРёСЂРѕРІРєРё.
+      if end_groups_index <= footer_index
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_invalid_group_structure')
       end
 
       begin_index = rows.index do |row|
@@ -320,16 +339,13 @@ module DocumentGenerator
         )
       end
 
-      # Статический префикс находится до GROUP_HEADER.
-      prefix_rows = rows[
-        0...group_header_index
-      ].to_a.reject do |row|
+      # РЎС‚Р°С‚РёС‡РµСЃРєРёР№ РїСЂРµС„РёРєСЃ РЅР°С…РѕРґРёС‚СЃСЏ РґРѕ GROUP_HEADER.
+      prefix_rows = rows[0...group_header_index].to_a.reject do |row|
         excel_group_control_row?(row, ns)
       end
 
-      # Заголовок первого уровня заканчивается перед GROUP_HEADER_2
-      # или BEGIN_ROW. Поддерживаются оба допустимых варианта расположения
-      # управляющих маркеров.
+      # Р—Р°РіРѕР»РѕРІРѕРє РїРµСЂРІРѕРіРѕ СѓСЂРѕРІРЅСЏ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ РїРµСЂРµРґ GROUP_HEADER_2 РёР»Рё
+      # BEGIN_ROW. РџРѕРґРґРµСЂР¶РёРІР°СЋС‚СЃСЏ РѕР±Р° РґРѕРїСѓСЃС‚РёРјС‹С… РІР°СЂРёР°РЅС‚Р° СЂР°СЃРїРѕР»РѕР¶РµРЅРёСЏ.
       group_header_end = [
         group_header_2_index,
         begin_index
@@ -341,7 +357,7 @@ module DocumentGenerator
         (group_header_index + 1)...group_header_end
       ].to_a
 
-      # Заголовок второго уровня заканчивается перед BEGIN_ROW.
+      # Р—Р°РіРѕР»РѕРІРѕРє РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅСЏ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ РїРµСЂРµРґ BEGIN_ROW.
       group_header_2_rows = []
 
       if group_header_2_index
@@ -355,46 +371,48 @@ module DocumentGenerator
         end
       end
 
-      row_template = rows[
-        (begin_index + 1)...end_index
-      ].to_a
+      row_template = rows[(begin_index + 1)...end_index].to_a
 
-      # Содержимое GROUP_FOOTER_2 находится между его маркером
-      # и GROUP_FOOTER.
+      # GROUP_FOOTER_2 РЅР°С‡РёРЅР°РµС‚ РїРѕРІС‚РѕСЂСЏРµРјС‹Р№ РїРѕРґРІР°Р» РІРЅСѓС‚СЂРµРЅРЅРµР№ РіСЂСѓРїРїС‹.
+      # Р’СЃС‘ РґРѕ GROUP_FOOTER РѕС‚РЅРѕСЃРёС‚СЃСЏ С‚РѕР»СЊРєРѕ Рє СЌС‚РѕРјСѓ РІРЅСѓС‚СЂРµРЅРЅРµРјСѓ РїРѕРґРІР°Р»Сѓ.
       group_footer_2_rows = []
 
       if group_footer_2_index
         if group_footer_2_index < footer_index
           group_footer_2_rows = rows[
             (group_footer_2_index + 1)...footer_index
-          ].to_a
+          ].to_a.reject do |row|
+            excel_group_control_row?(row, ns)
+          end
         else
           raise DocumentGenerator::TemplateError,
-                I18n.t('document_generator.error_row_block_mismatch')
+                I18n.t('document_generator.error_invalid_group_structure')
         end
       end
 
-      # В соответствии с синтаксисом шаблона GROUP_FOOTER является
-      # завершающим маркером группы. Поэтому строки после него являются
-      # обычным статическим текстом и не должны повторяться для каждой группы.
-      suffix_rows = rows[
-        (footer_index + 1)...rows.length
+      # РЎРѕРґРµСЂР¶РёРјРѕРµ РјРµР¶РґСѓ END_ROW Рё GROUP_FOOTER_2/GROUP_FOOTER СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ
+      # РєР°Рє С‚РµР»Рѕ РІРЅРµС€РЅРµР№ РіСЂСѓРїРїС‹. РћРЅРѕ РІС‹РІРѕРґРёС‚СЃСЏ РѕРґРёРЅ СЂР°Р· РґР»СЏ РєР°Р¶РґРѕР№ РІРЅРµС€РЅРµР№
+      # РіСЂСѓРїРїС‹ РїРѕСЃР»Рµ РѕР±СЂР°Р±РѕС‚РєРё РІСЃРµС… РµС‘ РІР»РѕР¶РµРЅРЅС‹С… РіСЂСѓРїРї.
+      outer_group_body_end = group_footer_2_index || footer_index
+
+      group_body_rows = rows[
+        (end_index + 1)...outer_group_body_end
       ].to_a.reject do |row|
         excel_group_control_row?(row, ns)
       end
 
-      # Строки между END_ROW и GROUP_FOOTER являются содержимым
-      # итогового блока первого уровня.
-      first_footer_start = end_index + 1
-
-      if group_footer_2_index
-        first_footer_end = group_footer_2_index
-      else
-        first_footer_end = footer_index
+      # GROUP_FOOTER РЅР°С‡РёРЅР°РµС‚ РїРѕРІС‚РѕСЂСЏРµРјС‹Р№ РїРѕРґРІР°Р» РІРЅРµС€РЅРµР№ РіСЂСѓРїРїС‹.
+      # РћРЅ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РЅР° END_GROUPS.
+      group_footer_rows = rows[
+        (footer_index + 1)...end_groups_index
+      ].to_a.reject do |row|
+        excel_group_control_row?(row, ns)
       end
 
-      group_footer_rows = rows[
-        first_footer_start...first_footer_end
+      # Р’СЃС‘ РїРѕСЃР»Рµ END_GROUPS СЏРІР»СЏРµС‚СЃСЏ РѕР±С‹С‡РЅС‹Рј РїСЂРѕРґРѕР»Р¶РµРЅРёРµРј РґРѕРєСѓРјРµРЅС‚Р° Рё
+      # РїРѕСЌС‚РѕРјСѓ РґРѕР±Р°РІР»СЏРµС‚СЃСЏ С‚РѕР»СЊРєРѕ РѕРґРёРЅ СЂР°Р·, РїРѕСЃР»Рµ СЂР°Р·РІРѕСЂР°С‡РёРІР°РЅРёСЏ РіСЂСѓРїРї.
+      suffix_rows = rows[
+        (end_groups_index + 1)...rows.length
       ].to_a.reject do |row|
         excel_group_control_row?(row, ns)
       end
@@ -403,18 +421,17 @@ module DocumentGenerator
 
       groups.each do |group|
         group_context = context.merge(
-          'GroupValue' => group['GroupValue'],
           'count' => group['count']
         )
 
-        # Передаём агрегаты первого уровня.
+        # РџРµСЂРµРґР°С‘Рј Р°РіСЂРµРіР°С‚С‹ РїРµСЂРІРѕРіРѕ СѓСЂРѕРІРЅСЏ.
         group.each do |key, value|
           if key.to_s.start_with?('group_agg_')
             group_context[key] = value
           end
         end
 
-        # Заголовок первого уровня.
+        # Р—Р°РіРѕР»РѕРІРѕРє РїРµСЂРІРѕРіРѕ СѓСЂРѕРІРЅСЏ.
         expanded_rows.concat(
           render_excel_group_rows(
             group_header_rows,
@@ -440,18 +457,17 @@ module DocumentGenerator
         else
           second_groups.each do |group_2|
             group_2_context = group_context.merge(
-              'GroupValue2' => group_2['GroupValue2'],
               'count' => group_2['count']
             )
 
-            # Передаём агрегаты второго уровня.
+            # РџРµСЂРµРґР°С‘Рј Р°РіСЂРµРіР°С‚С‹ РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅСЏ.
             group_2.each do |key, value|
               if key.to_s.start_with?('group_2_agg_')
                 group_2_context[key] = value
               end
             end
 
-            # Заголовок второго уровня.
+            # Р—Р°РіРѕР»РѕРІРѕРє РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅСЏ.
             expanded_rows.concat(
               render_excel_group_rows(
                 group_header_2_rows,
@@ -460,7 +476,7 @@ module DocumentGenerator
               )
             )
 
-            # Основные записи второго уровня.
+            # РћСЃРЅРѕРІРЅС‹Рµ Р·Р°РїРёСЃРё РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅСЏ.
             group_2['records'].to_a.each do |record|
               row_context = group_2_context.merge(record)
 
@@ -473,7 +489,7 @@ module DocumentGenerator
               )
             end
 
-            # Необязательный итог второго уровня.
+            # РџРѕРґРІР°Р» РІС‚РѕСЂРѕРіРѕ СѓСЂРѕРІРЅСЏ РїРѕРІС‚РѕСЂСЏРµС‚СЃСЏ РґР»СЏ РєР°Р¶РґРѕР№ РІРЅСѓС‚СЂРµРЅРЅРµР№ РіСЂСѓРїРїС‹.
             unless group_footer_2_rows.empty?
               expanded_rows.concat(
                 render_excel_group_rows(
@@ -486,7 +502,19 @@ module DocumentGenerator
           end
         end
 
-        # Итог первого уровня.
+        # РЎРѕРґРµСЂР¶РёРјРѕРµ РїРѕСЃР»Рµ END_ROW Рё РґРѕ GROUP_FOOTER_2/GROUP_FOOTER
+        # РѕС‚РЅРѕСЃРёС‚СЃСЏ Рє РІРЅРµС€РЅРµР№ РіСЂСѓРїРїРµ Рё РїРѕРІС‚РѕСЂСЏРµС‚СЃСЏ РѕРґРёРЅ СЂР°Р· РґР»СЏ РЅРµС‘.
+        unless group_body_rows.empty?
+          expanded_rows.concat(
+            render_excel_group_rows(
+              group_body_rows,
+              group_context,
+              ns
+            )
+          )
+        end
+
+        # РџРѕРґРІР°Р» РїРµСЂРІРѕРіРѕ СѓСЂРѕРІРЅСЏ РїРѕРІС‚РѕСЂСЏРµС‚СЃСЏ РґР»СЏ РєР°Р¶РґРѕР№ РІРЅРµС€РЅРµР№ РіСЂСѓРїРїС‹.
         unless group_footer_rows.empty?
           expanded_rows.concat(
             render_excel_group_rows(
@@ -511,16 +539,16 @@ module DocumentGenerator
       end
     end
 
-    # Клонирует и обрабатывает набор строк Excel с указанным контекстом.
+    # РљР»РѕРЅРёСЂСѓРµС‚ Рё РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ РЅР°Р±РѕСЂ СЃС‚СЂРѕРє Excel СЃ СѓРєР°Р·Р°РЅРЅС‹Рј РєРѕРЅС‚РµРєСЃС‚РѕРј.
     #
-    # @param template_rows [Array<Nokogiri::XML::Node>] Шаблонные строки.
-    # @param context [Hash] Контекст конкретной группы или записи.
-    # @param ns [Hash] Пространства имен XML.
-    # @return [Array<Nokogiri::XML::Node>] Обработанные копии строк.
+    # @param template_rows [Array<Nokogiri::XML::Node>] РЁР°Р±Р»РѕРЅРЅС‹Рµ СЃС‚СЂРѕРєРё.
+    # @param context [Hash] РљРѕРЅС‚РµРєСЃС‚ РєРѕРЅРєСЂРµС‚РЅРѕР№ РіСЂСѓРїРїС‹ РёР»Рё Р·Р°РїРёСЃРё.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјРµРЅ XML.
+    # @return [Array<Nokogiri::XML::Node>] РћР±СЂР°Р±РѕС‚Р°РЅРЅС‹Рµ РєРѕРїРёРё СЃС‚СЂРѕРє.
     def render_excel_group_rows(template_rows, context, ns)
       clones = template_rows.map(&:dup)
 
-      # Сначала разворачиваем вложенные коллекции текущего контекста.
+      # РЎРЅР°С‡Р°Р»Р° СЂР°Р·РІРѕСЂР°С‡РёРІР°РµРј РІР»РѕР¶РµРЅРЅС‹Рµ РєРѕР»Р»РµРєС†РёРё С‚РµРєСѓС‰РµРіРѕ РєРѕРЅС‚РµРєСЃС‚Р°.
       clones = TemplateProcessor.process_collection_blocks(
         clones,
         context,
@@ -528,7 +556,7 @@ module DocumentGenerator
         @error_behavior
       )
 
-      # Затем обрабатываем условия и обычные маркеры.
+      # Р—Р°С‚РµРј РѕР±СЂР°Р±Р°С‚С‹РІР°РµРј СѓСЃР»РѕРІРёСЏ Рё РѕР±С‹С‡РЅС‹Рµ РјР°СЂРєРµСЂС‹.
       clones.each do |clone|
         TemplateProcessor.process_conditionals_in_block(
           clone,
@@ -548,11 +576,11 @@ module DocumentGenerator
       clones
     end
 
-    # Проверяет, является ли строка Excel управляющей строкой группировки.
+    # РџСЂРѕРІРµСЂСЏРµС‚, СЏРІР»СЏРµС‚СЃСЏ Р»Рё СЃС‚СЂРѕРєР° Excel СѓРїСЂР°РІР»СЏСЋС‰РµР№ СЃС‚СЂРѕРєРѕР№ РіСЂСѓРїРїРёСЂРѕРІРєРё.
     #
-    # @param row [Nokogiri::XML::Node] XML-узел строки Excel.
-    # @param ns [Hash] Пространства имен XML.
-    # @return [Boolean] true, если строка содержит только управляющую команду.
+    # @param row [Nokogiri::XML::Node] XML-СѓР·РµР» СЃС‚СЂРѕРєРё Excel.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјРµРЅ XML.
+    # @return [Boolean] true, РµСЃР»Рё СЃС‚СЂРѕРєР° СЃРѕРґРµСЂР¶РёС‚ С‚РѕР»СЊРєРѕ СѓРїСЂР°РІР»СЏСЋС‰СѓСЋ РєРѕРјР°РЅРґСѓ.
     def excel_group_control_row?(row, ns)
       text = excel_row_text(row, ns)
 
@@ -560,17 +588,18 @@ module DocumentGenerator
         /\A\s*<%\s*(
           GROUP_BY(?:_2)?\s*:\s*[^%]+|
           GROUP_HEADER(?:_2)?|
-          GROUP_FOOTER(?:_2)?
+          GROUP_FOOTER(?:_2)?|
+          END_GROUPS
         )\s*%>\s*\z/ix
       )
     end
 
-    # Разворачивает блок BEGIN_TOTAL/END_TOTAL один раз для всей выборки,
-    # сохраняя его исходное положение относительно строк шаблона.
+    # Р Р°Р·РІРѕСЂР°С‡РёРІР°РµС‚ Р±Р»РѕРє BEGIN_TOTAL/END_TOTAL РѕРґРёРЅ СЂР°Р· РґР»СЏ РІСЃРµР№ РІС‹Р±РѕСЂРєРё,
+    # СЃРѕС…СЂР°РЅСЏСЏ РµРіРѕ РёСЃС…РѕРґРЅРѕРµ РїРѕР»РѕР¶РµРЅРёРµ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ СЃС‚СЂРѕРє С€Р°Р±Р»РѕРЅР°.
     #
-    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
-    # @param context [Hash] Общий контекст выгрузки.
-    # @param ns [Hash] Пространства имён XML.
+    # @param doc [Nokogiri::XML::Document] XML-РґРѕРєСѓРјРµРЅС‚ Р»РёСЃС‚Р° Excel.
+    # @param context [Hash] РћР±С‰РёР№ РєРѕРЅС‚РµРєСЃС‚ РІС‹РіСЂСѓР·РєРё.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјС‘РЅ XML.
     # @return [void]
     def process_excel_total_blocks(doc, context, ns)
       rows = doc.xpath('//xmlns:row', ns).to_a
@@ -624,19 +653,19 @@ module DocumentGenerator
       ].each(&:remove)
     end
 
-    # Разворачивает блоки BEGIN_ROW/END_ROW на листе Excel.
+    # Р Р°Р·РІРѕСЂР°С‡РёРІР°РµС‚ Р±Р»РѕРєРё BEGIN_ROW/END_ROW РЅР° Р»РёСЃС‚Рµ Excel.
     #
-    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
-    # @param context [Hash] Общий контекст данных.
-    # @param records [Array<Hash>] Записи, по которым выполняется цикл.
-    # @param ns [Hash] Пространства имён XML.
+    # @param doc [Nokogiri::XML::Document] XML-РґРѕРєСѓРјРµРЅС‚ Р»РёСЃС‚Р° Excel.
+    # @param context [Hash] РћР±С‰РёР№ РєРѕРЅС‚РµРєСЃС‚ РґР°РЅРЅС‹С….
+    # @param records [Array<Hash>] Р—Р°РїРёСЃРё, РїРѕ РєРѕС‚РѕСЂС‹Рј РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ С†РёРєР».
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјС‘РЅ XML.
     # @return [void]
     def process_excel_row_blocks(doc, context, records, ns)
       loop do
-        # Получаем актуальный список строк после каждой операции вставки/удаления.
+        # РџРѕР»СѓС‡Р°РµРј Р°РєС‚СѓР°Р»СЊРЅС‹Р№ СЃРїРёСЃРѕРє СЃС‚СЂРѕРє РїРѕСЃР»Рµ РєР°Р¶РґРѕР№ РѕРїРµСЂР°С†РёРё РІСЃС‚Р°РІРєРё/СѓРґР°Р»РµРЅРёСЏ.
         rows = doc.xpath('//xmlns:row', ns).to_a
 
-        # Ищем строку, содержащую начало основного цикла.
+        # РС‰РµРј СЃС‚СЂРѕРєСѓ, СЃРѕРґРµСЂР¶Р°С‰СѓСЋ РЅР°С‡Р°Р»Рѕ РѕСЃРЅРѕРІРЅРѕРіРѕ С†РёРєР»Р°.
         begin_index = rows.index do |row|
           row_text = excel_row_text(row, ns)
 
@@ -645,10 +674,10 @@ module DocumentGenerator
           )
         end
 
-        # Больше циклов в листе нет.
+        # Р‘РѕР»СЊС€Рµ С†РёРєР»РѕРІ РІ Р»РёСЃС‚Рµ РЅРµС‚.
         break unless begin_index
 
-        # Ищем END_ROW после найденного BEGIN_ROW.
+        # РС‰РµРј END_ROW РїРѕСЃР»Рµ РЅР°Р№РґРµРЅРЅРѕРіРѕ BEGIN_ROW.
         end_index = nil
 
         ((begin_index + 1)...rows.length).each do |index|
@@ -662,7 +691,7 @@ module DocumentGenerator
           end
         end
 
-        # BEGIN_ROW без END_ROW является ошибкой структуры шаблона.
+        # BEGIN_ROW Р±РµР· END_ROW СЏРІР»СЏРµС‚СЃСЏ РѕС€РёР±РєРѕР№ СЃС‚СЂСѓРєС‚СѓСЂС‹ С€Р°Р±Р»РѕРЅР°.
         unless end_index
           error_msg = I18n.t(
             'document_generator.error_missing_end_row'
@@ -671,8 +700,8 @@ module DocumentGenerator
           raise DocumentGenerator::TemplateError, error_msg
         end
 
-        # Внутри одного основного ROW-блока другой BEGIN_ROW не допускается.
-        # Вложенные циклы предназначены для SUBTASKS/WATCHERS/RELATIONS.
+        # Р’РЅСѓС‚СЂРё РѕРґРЅРѕРіРѕ РѕСЃРЅРѕРІРЅРѕРіРѕ ROW-Р±Р»РѕРєР° РґСЂСѓРіРѕР№ BEGIN_ROW РЅРµ РґРѕРїСѓСЃРєР°РµС‚СЃСЏ.
+        # Р’Р»РѕР¶РµРЅРЅС‹Рµ С†РёРєР»С‹ РїСЂРµРґРЅР°Р·РЅР°С‡РµРЅС‹ РґР»СЏ SUBTASKS/WATCHERS/RELATIONS.
         nested_begin_index = nil
 
         ((begin_index + 1)...end_index).each do |index|
@@ -691,27 +720,27 @@ module DocumentGenerator
                 I18n.t('document_generator.error_row_block_mismatch')
         end
 
-        # Строки между BEGIN_ROW и END_ROW являются шаблоном одной записи.
+        # РЎС‚СЂРѕРєРё РјРµР¶РґСѓ BEGIN_ROW Рё END_ROW СЏРІР»СЏСЋС‚СЃСЏ С€Р°Р±Р»РѕРЅРѕРј РѕРґРЅРѕР№ Р·Р°РїРёСЃРё.
         template_rows = rows[
           (begin_index + 1)...end_index
         ].to_a
 
-        # Сохраняем строку BEGIN_ROW как точку вставки.
+        # РЎРѕС…СЂР°РЅСЏРµРј СЃС‚СЂРѕРєСѓ BEGIN_ROW РєР°Рє С‚РѕС‡РєСѓ РІСЃС‚Р°РІРєРё.
         begin_row = rows[begin_index]
 
-        # Формируем все строки, которые должны заменить исходный блок.
+        # Р¤РѕСЂРјРёСЂСѓРµРј РІСЃРµ СЃС‚СЂРѕРєРё, РєРѕС‚РѕСЂС‹Рµ РґРѕР»Р¶РЅС‹ Р·Р°РјРµРЅРёС‚СЊ РёСЃС…РѕРґРЅС‹Р№ Р±Р»РѕРє.
         expanded_rows = []
 
         records.each_with_index do |record, record_index|
           begin
-            # Объединяем общий контекст с данными текущей задачи.
+            # РћР±СЉРµРґРёРЅСЏРµРј РѕР±С‰РёР№ РєРѕРЅС‚РµРєСЃС‚ СЃ РґР°РЅРЅС‹РјРё С‚РµРєСѓС‰РµР№ Р·Р°РґР°С‡Рё.
             merged_context = context.merge(record)
 
-            # Создаём независимые XML-копии всех строк тела цикла.
+            # РЎРѕР·РґР°С‘Рј РЅРµР·Р°РІРёСЃРёРјС‹Рµ XML-РєРѕРїРёРё РІСЃРµС… СЃС‚СЂРѕРє С‚РµР»Р° С†РёРєР»Р°.
             clones = template_rows.map(&:dup)
 
-            # Обрабатываем вложенные коллекционные циклы:
-            # SUBTASKS, WATCHERS и RELATIONS.
+            # РћР±СЂР°Р±Р°С‚С‹РІР°РµРј РІР»РѕР¶РµРЅРЅС‹Рµ РєРѕР»Р»РµРєС†РёРѕРЅРЅС‹Рµ С†РёРєР»С‹:
+            # SUBTASKS, WATCHERS Рё RELATIONS.
             clones = TemplateProcessor.process_collection_blocks(
               clones,
               merged_context,
@@ -719,7 +748,7 @@ module DocumentGenerator
               @error_behavior
             )
 
-            # Обрабатываем условия и обычные поля каждой строки.
+            # РћР±СЂР°Р±Р°С‚С‹РІР°РµРј СѓСЃР»РѕРІРёСЏ Рё РѕР±С‹С‡РЅС‹Рµ РїРѕР»СЏ РєР°Р¶РґРѕР№ СЃС‚СЂРѕРєРё.
             clones.each do |clone|
               TemplateProcessor.process_conditionals_in_block(
                 clone,
@@ -736,10 +765,10 @@ module DocumentGenerator
               )
             end
 
-            # Добавляем готовые строки текущей записи в общий результат.
+            # Р”РѕР±Р°РІР»СЏРµРј РіРѕС‚РѕРІС‹Рµ СЃС‚СЂРѕРєРё С‚РµРєСѓС‰РµР№ Р·Р°РїРёСЃРё РІ РѕР±С‰РёР№ СЂРµР·СѓР»СЊС‚Р°С‚.
             expanded_rows.concat(clones)
           rescue DocumentGenerator::SkipRecordError
-            # При skip_record пропускаем только текущую запись.
+            # РџСЂРё skip_record РїСЂРѕРїСѓСЃРєР°РµРј С‚РѕР»СЊРєРѕ С‚РµРєСѓС‰СѓСЋ Р·Р°РїРёСЃСЊ.
             issue = record['__issue']
 
             Rails.logger.warn(
@@ -750,37 +779,37 @@ module DocumentGenerator
           end
         end
 
-        # Вставляем готовые строки непосредственно перед BEGIN_ROW.
+        # Р’СЃС‚Р°РІР»СЏРµРј РіРѕС‚РѕРІС‹Рµ СЃС‚СЂРѕРєРё РЅРµРїРѕСЃСЂРµРґСЃС‚РІРµРЅРЅРѕ РїРµСЂРµРґ BEGIN_ROW.
         #
-        # Вставляем в обратном порядке, поскольку каждая новая строка
-        # добавляется перед одной и той же исходной строкой BEGIN_ROW.
+        # Р’СЃС‚Р°РІР»СЏРµРј РІ РѕР±СЂР°С‚РЅРѕРј РїРѕСЂСЏРґРєРµ, РїРѕСЃРєРѕР»СЊРєСѓ РєР°Р¶РґР°СЏ РЅРѕРІР°СЏ СЃС‚СЂРѕРєР°
+        # РґРѕР±Р°РІР»СЏРµС‚СЃСЏ РїРµСЂРµРґ РѕРґРЅРѕР№ Рё С‚РѕР№ Р¶Рµ РёСЃС…РѕРґРЅРѕР№ СЃС‚СЂРѕРєРѕР№ BEGIN_ROW.
         expanded_rows.each do |clone|
           begin_row.add_previous_sibling(clone)
         end
 
-        # Удаляем весь исходный блок:
-        # BEGIN_ROW + тело шаблона + END_ROW.
+        # РЈРґР°Р»СЏРµРј РІРµСЃСЊ РёСЃС…РѕРґРЅС‹Р№ Р±Р»РѕРє:
+        # BEGIN_ROW + С‚РµР»Рѕ С€Р°Р±Р»РѕРЅР° + END_ROW.
         rows[
           begin_index..end_index
         ].each(&:remove)
       end
     end
 
-    # Возвращает объединённый текст всех текстовых ячеек строки Excel.
+    # Р’РѕР·РІСЂР°С‰Р°РµС‚ РѕР±СЉРµРґРёРЅС‘РЅРЅС‹Р№ С‚РµРєСЃС‚ РІСЃРµС… С‚РµРєСЃС‚РѕРІС‹С… СЏС‡РµРµРє СЃС‚СЂРѕРєРё Excel.
     #
-    # @param row [Nokogiri::XML::Node] XML-узел <row>.
-    # @param ns [Hash] Пространства имён XML.
-    # @return [String] Текст всех текстовых узлов строки.
+    # @param row [Nokogiri::XML::Node] XML-СѓР·РµР» <row>.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјС‘РЅ XML.
+    # @return [String] РўРµРєСЃС‚ РІСЃРµС… С‚РµРєСЃС‚РѕРІС‹С… СѓР·Р»РѕРІ СЃС‚СЂРѕРєРё.
     def excel_row_text(row, ns)
       row.xpath(
         ".//*[local-name()='t']"
       ).map(&:text).join
     end
 
-    # Перенумеровывает строки и адреса ячеек после разворачивания циклов.
+    # РџРµСЂРµРЅСѓРјРµСЂРѕРІС‹РІР°РµС‚ СЃС‚СЂРѕРєРё Рё Р°РґСЂРµСЃР° СЏС‡РµРµРє РїРѕСЃР»Рµ СЂР°Р·РІРѕСЂР°С‡РёРІР°РЅРёСЏ С†РёРєР»РѕРІ.
     #
-    # @param doc [Nokogiri::XML::Document] XML-документ листа Excel.
-    # @param ns [Hash] Пространства имён XML.
+    # @param doc [Nokogiri::XML::Document] XML-РґРѕРєСѓРјРµРЅС‚ Р»РёСЃС‚Р° Excel.
+    # @param ns [Hash] РџСЂРѕСЃС‚СЂР°РЅСЃС‚РІР° РёРјС‘РЅ XML.
     # @return [void]
     def reindex_excel_rows(doc, ns)
       rows = doc.xpath(
@@ -789,25 +818,25 @@ module DocumentGenerator
       )
 
       rows.each_with_index do |row, row_index|
-        # Excel использует нумерацию строк начиная с 1.
+        # Excel РёСЃРїРѕР»СЊР·СѓРµС‚ РЅСѓРјРµСЂР°С†РёСЋ СЃС‚СЂРѕРє РЅР°С‡РёРЅР°СЏ СЃ 1.
         new_row_number = row_index + 1
 
-        # Обновляем номер XML-строки.
+        # РћР±РЅРѕРІР»СЏРµРј РЅРѕРјРµСЂ XML-СЃС‚СЂРѕРєРё.
         row['r'] = new_row_number.to_s
 
-        # Обновляем адрес каждой ячейки этой строки.
+        # РћР±РЅРѕРІР»СЏРµРј Р°РґСЂРµСЃ РєР°Р¶РґРѕР№ СЏС‡РµР№РєРё СЌС‚РѕР№ СЃС‚СЂРѕРєРё.
         row.xpath(
           './xmlns:c'
         ).each do |cell|
           current_reference = cell['r'].to_s
 
-          # Обычно адрес имеет вид A2, B2, AA15 и т.п.
+          # РћР±С‹С‡РЅРѕ Р°РґСЂРµСЃ РёРјРµРµС‚ РІРёРґ A2, B2, AA15 Рё С‚.Рї.
           column_match = current_reference.match(
             /\A([A-Z]+)\d+\z/i
           )
 
-          # Если адрес ячейки отсутствует или имеет нестандартный формат,
-          # не пытаемся угадывать его автоматически.
+          # Р•СЃР»Рё Р°РґСЂРµСЃ СЏС‡РµР№РєРё РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚ РёР»Рё РёРјРµРµС‚ РЅРµСЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ С„РѕСЂРјР°С‚,
+          # РЅРµ РїС‹С‚Р°РµРјСЃСЏ СѓРіР°РґС‹РІР°С‚СЊ РµРіРѕ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.
           next unless column_match
 
           column_name = column_match[1].upcase
@@ -819,4 +848,4 @@ module DocumentGenerator
 
   end
 end
-# v2610061505
+# v2610071414

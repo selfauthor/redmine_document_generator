@@ -45,6 +45,7 @@ module DocumentGenerator
           row: false,
           group_footer_2: false,
           group_footer: false,
+          end_groups: false,
           total: false
         },
         fields: [],
@@ -87,6 +88,12 @@ module DocumentGenerator
         /<%\s*GROUP_FOOTER\s*%>/i
       )
 
+      # END_GROUPS является единственным маркером, закрывающим всю
+      # повторяемую область группировки.
+      config[:blocks][:end_groups] = text.match?(
+        /<%\s*END_GROUPS\s*%>/i
+      )
+
       config[:blocks][:total] = text.match?(
         /<%\s*BEGIN_TOTAL\s*%>/i
       )
@@ -104,12 +111,27 @@ module DocumentGenerator
         /<%\s*BEGIN_RELATIONS\s*%>/i
       )
 
-      # Если в шаблоне используется GROUP_BY или GROUP_BY_2,
-      # GROUP_FOOTER обязателен и закрывает все уровни группировки.
-      if (config[:group_by] || config[:group_by_2]) &&
-         !config[:blocks][:group_footer]
+      # При использовании группировки обязательны GROUP_FOOTER и
+      # END_GROUPS. Первый закрывает внешний подвал группы, второй
+      # закрывает всю повторяемую область группировки.
+      if config[:group_by] || config[:group_by_2]
+        unless config[:blocks][:group_footer]
+          raise DocumentGenerator::TemplateError,
+                I18n.t('document_generator.error_missing_group_footer')
+        end
+
+        end_groups_count = text.scan(/<%\s*END_GROUPS\s*%>/i).length
+
+        if end_groups_count.zero?
+          raise DocumentGenerator::TemplateError,
+                I18n.t('document_generator.error_missing_end_groups')
+        elsif end_groups_count > 1
+          raise DocumentGenerator::TemplateError,
+                I18n.t('document_generator.error_duplicate_end_groups')
+        end
+      elsif text.match?(/<%\s*END_GROUPS\s*%>/i)
         raise DocumentGenerator::TemplateError,
-              I18n.t('document_generator.error_missing_group_footer')
+              I18n.t('document_generator.error_unexpected_end_groups')
       end
 
       # Второй уровень группировки не должен существовать без первого.
@@ -271,17 +293,51 @@ module DocumentGenerator
       fields
     end
 
+    # Извлекает весь текст из XML-файлов шаблона, необходимый для анализа
+    # структуры и поиска управляющих маркеров.
+    #
+    # Для DOCX читаются текстовые узлы w:t.
+    # Для XLSX сначала читаются строки sharedStrings.xml, где обычно находятся
+    # текстовые значения ячеек и управляющие маркеры шаблона.
+    #
+    # @return [String] Объединённый текст шаблона.
     def extract_text
       text = ''
+
       Zip::File.open(@file_path) do |zip_file|
         if @file_type == :docx
-          extract_docx_parts(zip_file).each { |entry| text += ' ' + extract_xml_text(entry, '//w:t', 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main') }
+          extract_docx_parts(zip_file).each do |entry|
+            text += ' ' + extract_xml_text(
+              entry,
+              '//w:t',
+              'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+            )
+          end
         else
-          extract_xlsx_parts(zip_file).each { |entry| text += ' ' + extract_xml_text(entry, '//si//t', 'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main') }
-          # Дополнительно проверяем ячейки напрямую
-          zip_file.glob('xl/worksheets/sheet*.xml').each { |entry| text += ' ' + extract_xml_text(entry, '//c/v', 'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main') }
+          # sharedStrings.xml использует namespace Excel SpreadsheetML.
+          # Поэтому префикс namespace должен присутствовать непосредственно
+          # в XPath, иначе Nokogiri не найдёт элементы si и t.
+          extract_xlsx_parts(zip_file).each do |entry|
+            text += ' ' + extract_xml_text(
+              entry,
+              '//xmlns:si//xmlns:t',
+              'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+            )
+          end
+
+          # Дополнительно проверяем значения непосредственно в worksheet XML.
+          # Это необходимо для XLSX-файлов, в которых часть строк хранится
+          # непосредственно в XML листа, а не в sharedStrings.xml.
+          zip_file.glob('xl/worksheets/sheet*.xml').each do |entry|
+            text += ' ' + extract_xml_text(
+              entry,
+              '//xmlns:c//xmlns:v',
+              'xmlns' => 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+            )
+          end
         end
       end
+
       text
     end
 
@@ -303,4 +359,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610061506
+# v2610071347

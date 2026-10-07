@@ -61,7 +61,13 @@ module DocumentGenerator
       @issues.each do |issue|
         begin
           record = build_issue_hash(issue)
-          record['row_number'] = records.length + 1
+
+          # При отсутствии GROUP_BY вся выборка считается одной группой.
+          # Поэтому сквозной номер записи одновременно является номером
+          # записи внутри этой единственной группы.
+          row_number = records.length + 1
+          record['row_number'] = row_number
+          record['row_number_in_group'] = row_number
 
           records << record
           valid_issues << issue
@@ -158,10 +164,13 @@ module DocumentGenerator
         end
 
         group_context = {
-          'GroupValue' => group_value,
           'count' => records.size,
           'records' => records
         }
+
+        # Значение группировки сохраняем под именем соответствующего поля.
+        # Имя приводится к нижнему регистру для совместимости с TemplateProcessor.
+        group_context[group_field.to_s.strip.downcase] = group_value
 
         # Если объявлен второй уровень, создаём вложенные группы только
         # из записей текущей группы первого уровня.
@@ -193,11 +202,19 @@ module DocumentGenerator
               record['row_number_in_group_2'] = index + 1
             end
 
+            # Формируем контекст внутренней группы.
+            # Значение группировки доступно по имени поля, по которому выполняется группировка.
             second_group_context = {
-              'GroupValue2' => group_value_2,
               'count' => second_records.size,
               'records' => second_records
-            }.merge(
+            }
+
+            # Значение второй группировки сохраняем под именем соответствующего поля.
+            # Имя приводится к нижнему регистру для совместимости с TemplateProcessor.
+            second_group_context[group_field_2.to_s.strip.downcase] = group_value_2
+
+            # Добавляем агрегаты второй группы.
+            second_group_context.merge!(
               calculate_aggregates(second_group_issues, 'group_2_')
             )
 
@@ -279,24 +296,31 @@ module DocumentGenerator
           default: field_key.humanize
         )
 
-        hash[localized_name] = self.class.format_value(value)
+        # Все имена полей в контексте хранятся в нижнем регистре.
+        # Это делает стандартные поля регистронезависимыми при обращении из шаблона.
+        hash[localized_name.to_s.downcase] = self.class.format_value(value)
       end
 
       # Формируем контекст родительской задачи.
       if issue.parent
-        hash['Parent'] = {
-          I18n.t('field_subject', default: 'Subject') => issue.parent.subject,
-          I18n.t('field_status', default: 'Status') => issue.parent.status&.name,
-          I18n.t('field_assigned_to', default: 'Assigned to') => issue.parent.assigned_to&.name,
-          'ID' => issue.parent.id
+        # Имена полей родительской задачи также хранятся в нижнем регистре,
+        # чтобы обращения Parent.ID, Parent.Id, Parent.id и Parent.iD
+        # обрабатывались одинаково.
+        hash['parent'] = {
+          I18n.t('field_subject', default: 'Subject').to_s.downcase => issue.parent.subject,
+          I18n.t('field_status', default: 'Status').to_s.downcase => issue.parent.status&.name,
+          I18n.t('field_assigned_to', default: 'Assigned to').to_s.downcase => issue.parent.assigned_to&.name,
+          'id' => issue.parent.id
         }
       end
 
       # Добавляем пользовательские поля только при отсутствии стандартного
       # поля с таким же отображаемым названием.
       issue.custom_field_values.each do |cfv|
-        field_name = cfv.custom_field.name
+        field_name = cfv.custom_field.name.to_s.downcase
 
+        # Стандартное поле с таким отображаемым именем имеет приоритет
+        # над пользовательским полем.
         next if hash.key?(field_name)
 
         value = cfv.value.is_a?(Array) ? cfv.value.join(', ') : cfv.value
@@ -314,16 +338,18 @@ module DocumentGenerator
                               .map do |child|
         subtask_hash = {
           '__issue' => child,
-          'ID' => child.id,
-          I18n.t('field_subject', default: 'Subject') => child.subject,
-          I18n.t('field_status', default: 'Status') => child.status&.name
+          'id' => child.id,
+          I18n.t('field_subject', default: 'Subject').to_s.downcase => child.subject,
+          I18n.t('field_status', default: 'Status').to_s.downcase => child.status&.name
         }
 
         # Пользовательские поля подзадачи также не должны перезаписывать
         # стандартные поля с тем же названием.
         child.custom_field_values.each do |cfv|
-          field_name = cfv.custom_field.name
+          field_name = cfv.custom_field.name.to_s.downcase
 
+          # Стандартное поле подзадачи имеет приоритет
+          # над пользовательским полем с таким же названием.
           next if subtask_hash.key?(field_name)
 
           value = cfv.value.is_a?(Array) ? cfv.value.join(', ') : cfv.value
@@ -345,30 +371,30 @@ module DocumentGenerator
 
         next nil unless target
 
-        {
-          I18n.t(
-            'document_generator.relation_type',
-            default: 'Relation Type'
-          ) => relation.relation_type_for(issue),
-          I18n.t(
-            'field_subject',
-            default: 'Subject'
-          ) => target.subject,
-          I18n.t(
-            'field_status',
-            default: 'Status'
-          ) => target.status&.name
-        }
+      {
+        I18n.t(
+          'document_generator.relation_type',
+          default: 'Relation Type'
+        ).to_s.downcase => relation.relation_type_for(issue),
+        I18n.t(
+          'field_subject',
+          default: 'Subject'
+        ).to_s.downcase => target.subject,
+        I18n.t(
+          'field_status',
+          default: 'Status'
+        ).to_s.downcase => target.status&.name
+      }
       end.compact
 
       # Формируем контекст наблюдателей.
       hash['watchers'] = issue.watchers.map do |watcher|
-        {
-          I18n.t(
-            'document_generator.watcher_name',
-            default: 'Name'
-          ) => watcher.user&.name
-        }
+      {
+        I18n.t(
+          'document_generator.watcher_name',
+          default: 'Name'
+        ).to_s.downcase => watcher.user&.name
+      }
       end
 
       hash
@@ -452,7 +478,7 @@ module DocumentGenerator
         /<%\s*(total_)?(sum|avg|min|max)\s*\(\s*([^%]+?)\s*\)\s*%>/i
       ) do |is_total, function_name, field_name|
         function = function_name.downcase
-        field = field_name.strip
+        field = field_name.strip.downcase
         total = !is_total.nil?
 
         command_name =
@@ -477,20 +503,11 @@ module DocumentGenerator
         }
       end
 
-      # count является отдельной специальной командой.
-      count_matches = @template_text.scan(
-        /<%\s*count\s*%>/i
-      ).size
-
-      if count_matches > 1
-        raise DocumentGenerator::TemplateError,
-              I18n.t(
-                'document_generator.error_duplicate_aggregate',
-                aggregate: 'count'
-              )
-      end
-
-      if count_matches == 1
+      # count является специальной контекстной переменной.
+      # Она может использоваться произвольное количество раз в разных
+      # группах и подвалах, поскольку её значение определяется текущим
+      # контекстом рендеринга.
+      if @template_text.match?(/<%\s*count\s*%>/i)
         requests << {
           is_total: false,
           func: 'count',
@@ -538,4 +555,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610061441
+# v2610071413

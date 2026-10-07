@@ -4,6 +4,7 @@ en:
   label_document_generator: "Document Generator"
   error_gems_not_loaded: "Required libraries for document generation are not installed. Please contact the administrator."
   label_document_generator_information: "Information"
+  label_dialog_placeholder: "Select the parameters to generate the document"
 
   document_generator:
     dialog_title: "Document Generator"
@@ -34,6 +35,10 @@ en:
     error_missing_group_header: "The <%GROUP_HEADER%> marker is required when grouping is used."
     error_unknown_group_field: "Grouping field '%{field}' was not found."
     error_missing_end_total: "Missing closing marker <%END_TOTAL%> for <%BEGIN_TOTAL%> block."
+    error_missing_end_groups: "The <%END_GROUPS%> marker is required when grouping is used."
+    error_duplicate_end_groups: "The <%END_GROUPS%> marker may be used only once in a template."
+    error_unexpected_end_groups: "The <%END_GROUPS%> marker cannot be used without <%GROUP_BY:%>."
+    error_invalid_group_structure: "Invalid grouping marker structure."
 
     # Error messages
     error_invalid_filename: "File name contains invalid characters"
@@ -58,6 +63,7 @@ en:
     error_missing_end_marker: "Missing closing marker <%END%> for condition IF(%{condition})"
     warning_field_missing: 'Field "%{field}" specified in the template was not found in issue %{issue}. The field was skipped.'
     warning_record_skipped: 'Field "%{field}" specified in the template was not found in issue %{issue}. The record was skipped.'
+    error_template_too_big: "The template file exceeds the maximum allowed size of %{max_size} KB."
 
     # Helper strings
     relation_type: "Relation Type"

@@ -4,6 +4,7 @@ ru:
   label_document_generator: "Генератор документов"
   error_gems_not_loaded: "Не установлены необходимые библиотеки для генерации документов. Обратитесь к администратору."
   label_document_generator_information: "Информация"
+  label_dialog_placeholder: "Выберите параметры для генерации документа"
 
   document_generator:
     dialog_title: "Генератор документов"
@@ -34,6 +35,10 @@ ru:
     error_missing_group_header: "При использовании группировки должен присутствовать маркер <%GROUP_HEADER%>."
     error_unknown_group_field: "Поле группировки «%{field}» не найдено."
     error_missing_end_total: "Не найден закрывающий маркер <%END_TOTAL%> для блока <%BEGIN_TOTAL%>."
+    error_missing_end_groups: "При использовании группировки должен присутствовать маркер <%END_GROUPS%>."
+    error_duplicate_end_groups: "Маркер <%END_GROUPS%> может использоваться в шаблоне только один раз."
+    error_unexpected_end_groups: "Маркер <%END_GROUPS%> нельзя использовать без <%GROUP_BY:%>."
+    error_invalid_group_structure: "Некорректная структура маркеров группировки."
 
     # Сообщения об ошибках
     error_invalid_filename: "Имя файла содержит недопустимые символы"
@@ -58,6 +63,7 @@ ru:
     error_missing_end_marker: "Не найден закрывающий маркер <%END%> для условия IF(%{condition})"
     warning_field_missing: 'В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне. Поле пропущено.'
     warning_record_skipped: 'В задаче %{issue} не найдено поле «%{field}», указанное в шаблоне. Запись пропущена.'
+    error_template_too_big: "Размер файла шаблона превышает максимально допустимый размер — %{max_size} КБ."
 
     # Вспомогательные строки
     relation_type: "Тип связи"

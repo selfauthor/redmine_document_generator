@@ -34,7 +34,7 @@ rescue LoadError => e
 end
 
 Rails.configuration.to_prepare do
-  require_dependency 'document_generator/hooks'
+  require File.expand_path('lib/document_generator/hooks.rb', __dir__)
 end
 
 Redmine::Plugin.register :redmine_document_generator do
@@ -42,7 +42,7 @@ Redmine::Plugin.register :redmine_document_generator do
   author 'Андрей Якушев'
   author_url 'https://a2ya.ru'
   description 'Генератор документов Word и Excel по выборке записей проекта с использованием шаблонов'
-  version '0.5.0'
+  version '0.6.0'
   url 'https://github.com/selfauthor/redmine_document_generator'
   requires_redmine version_or_higher: '6.0.0'
 
