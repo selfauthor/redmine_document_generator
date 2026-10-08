@@ -101,8 +101,10 @@ class DocumentGeneratorController < ApplicationController
     begin
       # Сохраняем загруженный шаблон внутри блока обработки ошибок,
       # чтобы ошибка превышения допустимого размера корректно возвращалась пользователю.
-      temp_template_path = save_uploaded_template(@template_file)
-
+      template_result = save_uploaded_template(@template_file)
+      temp_template_path = template_result[:path]
+      temp_template_dir = template_result[:dir]
+      
       parser = DocumentGenerator::TemplateParser.new(temp_template_path)
       config = parser.parse
 
@@ -139,7 +141,7 @@ class DocumentGeneratorController < ApplicationController
 
       # Формируем адрес защищённого маршрута скачивания.
       download_url = download_document_generator_export_url(
-        project_id: @project.id,
+        project_id: @project.identifier,
         uuid: export_uuid
       )
 
@@ -166,8 +168,11 @@ class DocumentGeneratorController < ApplicationController
         I18n.t('document_generator.error_render_failed', message: short_msg)
       )
     ensure
-      # Удаляем временный файл шаблона независимо от результата генерации.
-      FileUtils.rm_f(temp_template_path) if temp_template_path && File.exist?(temp_template_path)
+      # Удаляем временный каталог шаблона целиком независимо от результата генерации.
+      # Это предотвращает накопление пустых директорий в системном /tmp.
+      if temp_template_dir && File.directory?(temp_template_dir)
+        FileUtils.rm_rf(temp_template_dir)
+      end
     end
   end
 
@@ -229,10 +234,24 @@ class DocumentGeneratorController < ApplicationController
     }, status: :unprocessable_entity
   end
 
+  # Находит проект по числовому ID или строковому идентификатору из URL.
+  #
+  # Поддержка обоих вариантов нужна для обратной совместимости:
+  # существующие ссылки с числовым ID продолжают работать,
+  # а новые ссылки используют строковый project.identifier.
+  #
+  # @return [void]
   def find_project
-    @project = Project.find(params[:project_id])
-  rescue ActiveRecord::RecordNotFound
-    render_404
+    project_id = params[:project_id].to_s
+
+    @project =
+      if project_id.match?(/\A\d+\z/)
+        Project.find_by(id: project_id)
+      else
+        Project.find_by(identifier: project_id)
+      end
+
+    render_404 unless @project
   end
 
   def authorize_document_generator
@@ -292,13 +311,12 @@ class DocumentGeneratorController < ApplicationController
     begin
       # Перемещаем указатель временного файла в начало перед копированием.
       uploaded_file.tempfile.rewind
-
       # Копируем файл потоком, не загружая всё его содержимое в память Ruby.
       File.open(temp_path, 'wb') do |file|
         IO.copy_stream(uploaded_file.tempfile, file)
       end
-
-      temp_path
+      # Возвращаем хэш с путями для корректного последующего удаления всей директории
+      { dir: temp_dir, path: temp_path }
     rescue StandardError
       # Если сохранение не удалось, удаляем временный каталог целиком.
       FileUtils.rm_rf(temp_dir)
@@ -464,4 +482,4 @@ class DocumentGeneratorController < ApplicationController
   end
 
 end
-# v2610071038
+# v2610081345
