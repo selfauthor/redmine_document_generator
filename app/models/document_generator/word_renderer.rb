@@ -11,19 +11,35 @@ module DocumentGenerator
     # @return [Array<String>] Список предупреждений для пользователя.
     attr_reader :warnings
 
-    # Инициализация рендерера
+    # Инициализирует Word-рендерер.
     #
-    # @param template_path [String] Путь к файлу шаблона
-    # @param issues [Array<Issue>] Массив задач для выгрузки
-    # @param parser_config [Hash] Конфигурация парсера (настройки блоков)
-    # @param error_behavior [String] Поведение при ошибках: 'abort', 'skip_field', 'skip_record'
-    def initialize(template_path, issues, parser_config, error_behavior)
+    # @param template_path [String] Путь к шаблону DOCX.
+    # @param issues [Array<Issue>] Задачи для выгрузки.
+    # @param parser_config [Hash] Конфигурация шаблона.
+    # @param error_behavior [String] Поведение при ошибке.
+    # @param description_format [String] Режим форматирования Description:
+    #   raw или redmine.
+    def initialize(
+      template_path,
+      issues,
+      parser_config,
+      error_behavior,
+      description_format = 'raw'
+    )
       @template_path = template_path
       @issues = issues
       @parser_config = parser_config
       @error_behavior = error_behavior
 
-      # Создаём массив для предупреждений текущей выгрузки.
+      # Нормализуем режим, чтобы некорректное значение никогда
+      # не включало Redmine-форматирование случайно.
+      @description_format =
+        description_format.to_s == 'redmine' ? 'redmine' : 'raw'
+
+      @parser_config = @parser_config.merge(
+        description_format: @description_format
+      )
+
       @warnings = []
     end
 
@@ -283,4 +299,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610061508
+# v2610090938

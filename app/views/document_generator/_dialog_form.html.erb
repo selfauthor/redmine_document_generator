@@ -1,49 +1,100 @@
 <h3 class="title"><%= l('document_generator.dialog_title') %></h3>
 
 <%= form_tag document_generator_export_path(@project, request.query_parameters), method: :post, id: 'document-generator-form', multipart: true do %>
-  
+
   <fieldset class="box">
-    <legend><%= l('document_generator.template_file') %></legend>
+    <legend><%= l('document_generator.export_parameters') %></legend>
+
     <p>
-      <%= file_field_tag 'template_file', accept: '.docx,.xlsx', required: true %>
-      <span id="dg-template-error" class="error" style="display:none;"><%= l('document_generator.error_invalid_format') %></span>
+      <label for="template_file"><%= l('document_generator.template_file') %></label>
+      <%= file_field_tag 'template_file',
+                         accept: '.docx,.xlsx',
+                         required: true,
+                         id: 'template_file' %>
+      <span id="dg-template-error" class="error" style="display:none;">
+        <%= l('document_generator.error_invalid_format') %>
+      </span>
+    </p>
+
+    <p>
+      <label><%= l('document_generator.export_mode') %></label>
+
+      <label class="block">
+        <%= radio_button_tag 'export_mode', 'single', true %>
+        <%= l('document_generator.export_mode_single') %>
+      </label>
+
+      <label class="block">
+        <%= radio_button_tag 'export_mode', 'combined' %>
+        <%= l('document_generator.export_mode_combined') %>
+      </label>
+    </p>
+
+    <p>
+      <label for="dg_file_name"><%= l('document_generator.file_name') %></label>
+      <%= text_field_tag 'file_name',
+                         l('document_generator.default_file_name', default: 'Export'),
+                         required: true,
+                         id: 'dg_file_name' %>
+      <span id="dg-filename-error" class="error" style="display:none;">
+        <%= l('document_generator.error_invalid_filename') %>
+      </span>
     </p>
   </fieldset>
 
   <fieldset class="box">
-    <legend><%= l('document_generator.export_mode') %></legend>
-    <p>
-      <label><%= radio_button_tag 'export_mode', 'single', true %> <%= l('document_generator.export_mode_single') %></label><br>
-      <label><%= radio_button_tag 'export_mode', 'combined' %> <%= l('document_generator.export_mode_combined') %></label>
-    </p>
-  </fieldset>
+    <legend><%= l('document_generator.settings') %></legend>
 
-  <fieldset class="box">
-    <legend><%= l('document_generator.file_name') %></legend>
     <p>
-      <%= text_field_tag 'file_name', l('document_generator.default_file_name', default: 'Export'), required: true, id: 'dg_file_name' %>
-      <span id="dg-filename-error" class="error" style="display:none;"><%= l('document_generator.error_invalid_filename') %></span>
-    </p>
-  </fieldset>
+      <label><%= l('document_generator.description_format') %></label>
 
-  <fieldset class="box">
-    <legend><%= l('document_generator.error_behavior') %></legend>
+      <label class="block">
+        <%= radio_button_tag 'description_format', 'raw', true, id: 'dg-description-format-raw' %>
+        <%= l('document_generator.description_format_raw') %>
+      </label>
+
+      <label class="block" id="dg-description-format-redmine-label">
+        <%= radio_button_tag 'description_format',
+                             'redmine',
+                             false,
+                             id: 'dg-description-format-redmine' %>
+        <%= l('document_generator.description_format_redmine') %>
+      </label>
+
+      <span id="dg-description-format-disabled"
+            class="description"
+            style="display:none;">
+        <%= l('document_generator.description_format_word_only') %>
+      </span>
+    </p>
+
     <p>
-      <%= select_tag 'error_behavior', options_for_select([
-        [l('document_generator.error_abort'), 'abort'],
-        [l('document_generator.error_skip_field'), 'skip_field'],
-        [l('document_generator.error_skip_record'), 'skip_record']
-      ]) %>
+      <label for="error_behavior"><%= l('document_generator.error_behavior') %></label>
+
+      <%= select_tag 'error_behavior',
+                     options_for_select([
+                       [l('document_generator.error_abort'), 'abort'],
+                       [l('document_generator.error_skip_field'), 'skip_field'],
+                       [l('document_generator.error_skip_record'), 'skip_record']
+                     ]),
+                     id: 'error_behavior' %>
     </p>
   </fieldset>
 
   <fieldset class="box">
     <legend><%= l(:label_document_generator_information) %></legend>
-    <p id="dg-records-count" data-count="<%= @record_count %>"><%= l('document_generator.records_count', count: @record_count) %></p>
-    <p id="dg-files-count" 
-       data-text-single="<%= l('document_generator.single_file') %>" 
+
+    <p id="dg-records-count"
+       data-count="<%= @record_count %>">
+      <%= l('document_generator.records_count', count: @record_count) %>
+    </p>
+
+    <p id="dg-files-count"
+       data-text-single="<%= l('document_generator.single_file') %>"
        data-text-multiple="<%= l('document_generator.files_count', count: @record_count) %>">
-       <%= @record_count > 1 ? l('document_generator.files_count', count: @record_count) : l('document_generator.single_file') %>
+      <%= @record_count > 1 ?
+           l('document_generator.files_count', count: @record_count) :
+           l('document_generator.single_file') %>
     </p>
   </fieldset>
 
@@ -62,7 +113,10 @@
       <span id="dg-download-link-message">
         <%= l('document_generator.download_fallback_text') %>
       </span>
-      <a id="dg-download-link" href="#" target="_blank" rel="noopener">
+      <a id="dg-download-link"
+         href="#"
+         target="_blank"
+         rel="noopener">
         <%= l('document_generator.download_link_text') %>
       </a>
     </span>
@@ -92,4 +146,4 @@
   <% end %>
 
 <% end %>
-<!-- 2610091537 -->
+<!-- v2610081632 -->

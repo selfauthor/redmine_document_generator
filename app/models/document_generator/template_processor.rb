@@ -888,24 +888,27 @@ module DocumentGenerator
       node_map
     end
 
-    # ==========================================================================
-    # ПОДСТАНОВКА ЗНАЧЕНИЙ В УЗЛЫ
-    # ==========================================================================
-    # Подставляет значения полей в текстовые узлы Word или Excel.
+    # Подставляет значения полей в узлы Word или Excel.
+    #
+    # Поле «Описание» в Word обрабатывается отдельно, поскольку оно может
+    # превращаться не только в текст, но и в набор Word-блоков: абзацы,
+    # списки и таблицы.
     #
     # @param block_node [Nokogiri::XML::Node] XML-узел обрабатываемого блока.
     # @param context [Hash] Контекст текущей записи.
     # @param ns [Hash] Пространства имён XML документа.
-    # @param error_behavior [String] Стратегия обработки ошибок:
-    #   'abort', 'skip_field' или 'skip_record'.
+    # @param error_behavior [String] Стратегия обработки ошибок.
     # @return [Nokogiri::XML::Node] Обработанный XML-узел.
     def self.substitute_in_block(block_node, context, ns, error_behavior = 'abort')
-      # Word и Excel используют разные XML-пространства имён.
-      # Для Word сохраняем существующую нормализацию разбитых маркеров.
       if ns.key?('w')
         normalize_xml_nodes(
           block_node,
           ns
+        )
+
+        process_word_description_markers(
+          block_node,
+          context
         )
 
         text_nodes = block_node.xpath(
@@ -913,25 +916,21 @@ module DocumentGenerator
           ns
         ).to_a
       else
-        # Excel не должен проходить через Word-нормализацию.
-        # После преобразования sharedStrings текст находится непосредственно
-        # в элементах <t>.
+        # Excel использует обычную строковую подстановку.
         text_nodes = block_node.xpath(
           ".//*[local-name()='t']"
         ).to_a
       end
 
-      # Последовательно обрабатываем каждый текстовый узел.
+      # После специальной обработки Description оставшиеся маркеры
+      # обрабатываются обычным механизмом.
       text_nodes.each do |text_node|
         original = text_node.text
 
-        # Удаляем управляющие маркеры, которые не должны попасть
-        # в конечный документ.
         cleaned = clean_control_markers(
           original
         )
 
-        # Подставляем значения обычных полей.
         substituted = substitute_markers(
           cleaned,
           context,
@@ -942,8 +941,6 @@ module DocumentGenerator
 
         text_node.content = substituted
 
-        # Для Word сохраняем правила XML-пробелов.
-        # Для Excel этот атрибут также допустим и безвреден.
         if substituted.match?(/\A\s|\s\z/)
           text_node['xml:space'] = 'preserve'
         else
@@ -952,6 +949,172 @@ module DocumentGenerator
       end
 
       block_node
+    end
+
+    # Обрабатывает специальные маркеры <%Описание%> в Word.
+    #
+    # Если выбран режим raw, описание вставляется как обычный текст с сохранением
+    # переносов строк.
+    #
+    # Если выбран режим redmine, описание сначала проходит через штатный
+    # форматтер Redmine, после чего HTML преобразуется в WordprocessingML.
+    #
+    # @param block_node [Nokogiri::XML::Node] Текущий Word-блок.
+    # @param context [Hash] Контекст текущей записи.
+    # @return [void]
+    def self.process_word_description_markers(block_node, context)
+      ns = { 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main' }
+
+      marker_nodes = block_node.xpath(
+        './/w:t[contains(., "<%Описание%>") or contains(., "<%description%>")]',
+        ns
+      ).to_a
+
+      return if marker_nodes.empty?
+
+      issue = context['__issue']
+
+      return unless issue
+
+      description_format =
+        context['__description_format'].to_s == 'redmine' ? 'redmine' : 'raw'
+
+      marker_nodes.each do |text_node|
+        text = text_node.text
+
+        marker_match = text.match(
+          /<%\s*(Описание|description)\s*%>/i
+        )
+
+        next unless marker_match
+
+        run = text_node.parent
+        paragraph = run.at_xpath('ancestor::w:p[1]', ns)
+
+        next unless paragraph
+
+        formatter = DocumentGenerator::DescriptionFormatter.new(
+          issue,
+          block_node.document
+        )
+
+        # Блочное Redmine-содержимое нельзя помещать внутрь существующего w:p.
+        # Поэтому для отдельного маркера заменяем весь абзац набором новых блоков.
+        if description_format == 'redmine' &&
+           description_marker_is_only_content?(paragraph, ns)
+          replacement_nodes = formatter.build_nodes(
+            run,
+            paragraph,
+            description_format
+          )
+
+          replace_paragraph_with_nodes(
+            paragraph,
+            replacement_nodes
+          )
+
+          next
+        end
+
+        # Inline-режим используется для обычного текста и для ситуации,
+        # когда маркер находится среди другого текста абзаца.
+        replacement_nodes = formatter.build_nodes(
+          run,
+          paragraph,
+          description_format
+        )
+
+        replace_inline_marker(
+          text_node,
+          marker_match,
+          replacement_nodes,
+          run
+        )
+      end
+    end
+
+    # Проверяет, что абзац содержит только маркер Description и пробельные символы.
+    #
+    # Это позволяет безопасно заменить весь w:p на несколько Word-блоков,
+    # например на несколько абзацев или таблицу.
+    #
+    # @param paragraph [Nokogiri::XML::Node] Word-абзац.
+    # @param ns [Hash] Пространства имён Word.
+    # @return [Boolean] true, если в абзаце отсутствует другой текст.
+    def self.description_marker_is_only_content?(paragraph, ns)
+      text = paragraph.xpath(
+        './/w:t',
+        ns
+      ).map(&:text).join
+
+      text.match?(
+        /\A\s*<%\s*(Описание|description)\s*%>\s*\z/i
+      )
+    end
+
+    # Заменяет целый Word-абзац набором Word-блоков.
+    #
+    # @param paragraph [Nokogiri::XML::Node] Исходный w:p.
+    # @param nodes [Array<Nokogiri::XML::Node>] Новые Word-блоки.
+    # @return [void]
+    def self.replace_paragraph_with_nodes(paragraph, nodes)
+      nodes.each do |node|
+        paragraph.add_previous_sibling(node)
+      end
+
+      paragraph.remove
+    end
+
+    # Заменяет inline-маркер набором w:r/w:br.
+    #
+    # @param text_node [Nokogiri::XML::Node] Текстовый узел с маркером.
+    # @param marker_match [MatchData] Найденный маркер.
+    # @param replacement_nodes [Array<Nokogiri::XML::Node>] Новые Word-узлы.
+    # @param run [Nokogiri::XML::Node] Исходный w:r.
+    # @return [void]
+    def self.replace_inline_marker(text_node, marker_match, replacement_nodes, run)
+      text = text_node.text
+
+      before = text[0...marker_match.begin(0)]
+      after = text[marker_match.end(0)..] || ''
+
+      first = true
+
+      unless before.empty?
+        text_node.content = before
+        first = false
+      else
+        text_node.remove
+      end
+
+      replacement_nodes.each do |replacement|
+        if first
+          run.add_previous_sibling(replacement)
+          first = false
+        else
+          run.add_next_sibling(replacement)
+        end
+      end
+
+      unless after.empty?
+        after_run = run.dup
+        after_run.xpath(
+          './/w:t',
+          { 'w' => 'http://schemas.openxmlformats.org/wordprocessingml/2006/main' }
+        ).each(&:remove)
+
+        after_text = Nokogiri::XML::Node.new(
+          'w:t',
+          run.document
+        )
+        after_text.content = after
+        after_text['xml:space'] = 'preserve' if after.match?(/\A\s|\s\z/)
+
+        after_run.add_child(after_text)
+        run.add_next_sibling(after_run)
+      end
+
+      run.remove if run.children.empty?
     end
 
     # Разбирает список аргументов функции с учётом кавычек.
@@ -2020,4 +2183,4 @@ module DocumentGenerator
 
   end
 end
-# v2610071237
+# v2610090931

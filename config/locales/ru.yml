@@ -27,6 +27,14 @@ ru:
     download_fallback_text: "Если скачивание файла не началось, нажмите на ссылку:"
     download_link_text: "Скачать файл"
     settings_retention_hours_info: "Папки с созданными файлами удаляются по истечении указанного количества часов с момента создания. Значение по умолчанию: 24 часа."
+    export_parameters: "Параметры выгрузки"
+    settings: "Настройки"
+    description_format: "Форматирование поля «Описание»"
+    description_format_raw: "Как есть"
+    description_format_redmine: "С форматированием Redmine"
+    description_format_word_only: "Доступно только для выгрузки в Word"
+
+    # Сообщения об ошибках
     error_export_not_found: "Запрошенный результат выгрузки не найден или срок его хранения истёк."
     error_missing_end_row: "Не найден закрывающий маркер <%END_ROW%> для блока <%BEGIN_ROW%>"
     error_row_block_mismatch: "Некорректная структура блока <%BEGIN_ROW%> / <%END_ROW%>"
@@ -39,8 +47,6 @@ ru:
     error_duplicate_end_groups: "Маркер <%END_GROUPS%> может использоваться в шаблоне только один раз."
     error_unexpected_end_groups: "Маркер <%END_GROUPS%> нельзя использовать без <%GROUP_BY:%>."
     error_invalid_group_structure: "Некорректная структура маркеров группировки."
-
-    # Сообщения об ошибках
     error_invalid_filename: "Имя файла содержит недопустимые символы"
     error_invalid_template: "Ошибка в шаблоне: %{message}"
     error_corrupted_template: "Файл шаблона повреждён или имеет неверный формат: %{message}"

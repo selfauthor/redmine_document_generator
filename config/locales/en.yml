@@ -27,6 +27,14 @@ en:
     download_fallback_text: "If the download does not start, click the link:"
     download_link_text: "Download file"
     settings_retention_hours_info: "Folders containing generated files are deleted after this number of hours from creation. Default: 24 hours."
+    export_parameters: "Export parameters"
+    settings: "Settings"
+    description_format: "Description field formatting"
+    description_format_raw: "As is"
+    description_format_redmine: "With Redmine formatting"
+    description_format_word_only: "Available only for Word export"
+
+    # Error messages
     error_export_not_found: "The requested export was not found or has expired."
     error_missing_end_row: "Missing closing marker <%END_ROW%> for <%BEGIN_ROW%> block"
     error_row_block_mismatch: "Invalid <%BEGIN_ROW%> / <%END_ROW%> block structure"
@@ -39,8 +47,6 @@ en:
     error_duplicate_end_groups: "The <%END_GROUPS%> marker may be used only once in a template."
     error_unexpected_end_groups: "The <%END_GROUPS%> marker cannot be used without <%GROUP_BY:%>."
     error_invalid_group_structure: "Invalid grouping marker structure."
-
-    # Error messages
     error_invalid_filename: "File name contains invalid characters"
     error_invalid_template: "Template error: %{message}"
     error_corrupted_template: "Template file is corrupted or has invalid format: %{message}"

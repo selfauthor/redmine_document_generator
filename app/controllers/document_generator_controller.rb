@@ -73,6 +73,12 @@ class DocumentGeneratorController < ApplicationController
     @export_mode = params[:export_mode]
     @file_name = params[:file_name].to_s.strip
     @error_behavior = params[:error_behavior]
+
+    # Режим Redmine-разметки разрешён только для Word.
+    # Для Excel всегда используется обычная текстовая подстановка.
+    @description_format =
+      params[:description_format].to_s == 'redmine' ? 'redmine' : 'raw'
+
     @render_warnings = []
 
     # Проверяем имя файла до запуска генерации.
@@ -83,6 +89,15 @@ class DocumentGeneratorController < ApplicationController
     # Проверяем наличие шаблона и допустимость его расширения.
     unless @template_file && valid_template_extension?(@template_file.original_filename)
       return render_export_error(I18n.t('document_generator.error_invalid_format'))
+    end
+
+    # Режим Redmine-разметки разрешён только для Word.
+    # Для Excel всегда используется обычная текстовая подстановка.
+    if File.extname(@template_file.original_filename).downcase == '.xlsx'
+      @description_format = 'raw'
+    else
+      @description_format =
+        params[:description_format].to_s == 'redmine' ? 'redmine' : 'raw'
     end
 
     # Получаем задачи, выбранные текущими параметрами фильтра.
@@ -395,16 +410,42 @@ class DocumentGeneratorController < ApplicationController
     archive_path
   end
 
+  # Создаёт renderer в соответствии с расширением шаблона.
+  #
+  # @param template_path [String] Путь к шаблону.
+  # @param issues [Array<Issue>] Задачи для обработки.
+  # @param config [Hash] Конфигурация шаблона.
+  # @return [Object] Экземпляр WordRenderer или ExcelRenderer.
   def create_renderer(template_path, issues, config)
     ext = File.extname(template_path).downcase
-    renderer_class = case ext
-                     when '.docx' then DocumentGenerator::WordRenderer
-                     when '.xlsx' then DocumentGenerator::ExcelRenderer
-                     else
-                       raise DocumentGenerator::TemplateError, I18n.t('document_generator.error_invalid_format')
-                     end
 
-    renderer_class.new(template_path, issues, config, @error_behavior)
+    renderer_class =
+      case ext
+      when '.docx'
+        DocumentGenerator::WordRenderer
+      when '.xlsx'
+        DocumentGenerator::ExcelRenderer
+      else
+        raise DocumentGenerator::TemplateError,
+              I18n.t('document_generator.error_invalid_format')
+      end
+
+    if ext == '.docx'
+      renderer_class.new(
+        template_path,
+        issues,
+        config,
+        @error_behavior,
+        @description_format
+      )
+    else
+      renderer_class.new(
+        template_path,
+        issues,
+        config,
+        @error_behavior
+      )
+    end
   end
 
   def mime_type_for(ext)
@@ -482,4 +523,4 @@ class DocumentGeneratorController < ApplicationController
   end
 
 end
-# v2610081345
+# v2610090944

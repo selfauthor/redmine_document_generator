@@ -6,56 +6,123 @@ DG.validateFilename = function(filename) {
   return !invalidChars.test(filename) && filename.trim().length > 0;
 };
 
-// Проверка расширения файла шаблона (только .docx и .xlsx)
-// Возвращает true, если файл не выбран (считаем валидным состоянием)
+// Проверка расширения файла шаблона (только .docx и .xlsx).
+// Возвращает true, если выбран допустимый файл.
 DG.validateTemplateFile = function(fileInput) {
   if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-    return false; // Файл ещё не выбран — не ошибка
+    return false;
   }
+
   var filename = fileInput.files[0].name.toLowerCase();
   var validExtensions = ['.docx', '.xlsx'];
+
   return validExtensions.some(function(ext) {
     return filename.endsWith(ext);
   });
 };
 
-// Обновление информации в модальном окне
+// Возвращает расширение выбранного шаблона.
+// Если шаблон не выбран, возвращает пустую строку.
+DG.getTemplateExtension = function(fileInput) {
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    return '';
+  }
+
+  var filename = fileInput.files[0].name.toLowerCase();
+  var lastDot = filename.lastIndexOf('.');
+
+  if (lastDot === -1) {
+    return '';
+  }
+
+  return filename.substring(lastDot);
+};
+
+// Обновляет доступность вариантов форматирования поля «Описание».
+// Для Excel разрешён только режим «Как есть», поскольку форматирование
+// Redmine на данном этапе реализуется только для Word.
+DG.updateDescriptionFormatAvailability = function() {
+  var fileInput = document.getElementById('template_file');
+  var extension = DG.getTemplateExtension(fileInput);
+
+  var $raw = $('#dg-description-format-raw');
+  var $redmine = $('#dg-description-format-redmine');
+  var $redmineLabel = $('#dg-description-format-redmine-label');
+  var $disabledMessage = $('#dg-description-format-disabled');
+
+  // До выбора корректного шаблона оставляем оба варианта доступными.
+  if (extension === '.docx') {
+    $redmine.prop('disabled', false);
+    $redmineLabel.removeClass('disabled');
+    $disabledMessage.hide();
+
+    return;
+  }
+
+  // Для Excel режим форматирования Redmine недоступен.
+  if (extension === '.xlsx') {
+    $raw.prop('checked', true);
+    $redmine.prop('checked', false);
+    $redmine.prop('disabled', true);
+    $redmineLabel.addClass('disabled');
+    $disabledMessage.show();
+
+    return;
+  }
+
+  // Если файл ещё не выбран или имеет недопустимое расширение,
+  // возвращаем элемент в исходное состояние.
+  $redmine.prop('disabled', false);
+  $redmineLabel.removeClass('disabled');
+  $disabledMessage.hide();
+};
+
+
+// Обновление информации в модальном окне.
 DG.updateInfo = function() {
   var recordCountEl = $('#dg-records-count');
-  if (!recordCountEl.length) return; // Форма ещё не в DOM
+
+  if (!recordCountEl.length) {
+    return;
+  }
 
   var exportMode = $('input[name="export_mode"]:checked').val();
   var fileName = $('#dg_file_name').val();
   var fileInput = document.getElementById('template_file');
 
-  // Валидация имени файла
+  // Сначала синхронизируем доступность настройки форматирования
+  // с выбранным расширением шаблона.
+  DG.updateDescriptionFormatAvailability();
+
+  // Валидация имени файла.
   var isFilenameValid = DG.validateFilename(fileName);
-  
-  // Валидация формата файла шаблона
+
+  // Валидация формата файла шаблона.
   var isTemplateValid = DG.validateTemplateFile(fileInput);
-  
-  // Общая валидность (оба условия должны быть истинны)
+
+  // Общая валидность формы.
   var isValid = isFilenameValid && isTemplateValid;
-  
-  // Обновление информации о количестве файлов
+
+  // Обновление информации о количестве формируемых файлов.
   var $filesCount = $('#dg-files-count');
+
   if (exportMode === 'single') {
     $filesCount.text($filesCount.data('text-multiple'));
   } else {
     $filesCount.text($filesCount.data('text-single'));
   }
-  
-  // Блокируем/разблокируем кнопку выгрузки
+
+  // Блокируем/разблокируем кнопку выгрузки.
   $('#dg-submit-btn').prop('disabled', !isValid);
-  
-  // Показываем/скрываем ошибку имени файла
+
+  // Показываем/скрываем ошибку имени файла.
   if (fileName.length > 0 && !isFilenameValid) {
     $('#dg-filename-error').show();
   } else {
     $('#dg-filename-error').hide();
   }
 
-  // Показываем/скрываем ошибку формата файла
+  // Показываем/скрываем ошибку формата файла.
   if (fileInput && fileInput.files.length > 0 && !isTemplateValid) {
     $('#dg-template-error').show();
   } else {
@@ -72,6 +139,7 @@ DG.showExportMessage = function(type, message) {
   $('.dg-export-response-message').remove();
 
   var messages = Array.isArray(message) ? message : [message];
+
   var $container = $('<div>')
     .addClass('flash')
     .addClass(type === 'warning' ? 'warning' : 'error')
@@ -82,7 +150,7 @@ DG.showExportMessage = function(type, message) {
     $('<div>').text(item).appendTo($container);
   });
 
-  // Размещаем уведомление в начале рабочей области Redmine — перед заголовком страницы.
+  // Размещаем уведомление в начале рабочей области Redmine.
   var $content = $('#content');
 
   if ($content.length) {
@@ -90,16 +158,22 @@ DG.showExportMessage = function(type, message) {
   }
 };
 
+
 document.addEventListener('DOMContentLoaded', function() {
-  // Перемещение ссылки в блок экспорта
+  // Перемещение ссылки в блок экспорта.
   var linkContainer = document.getElementById('document-generator-export-link');
+
   if (linkContainer) {
     var otherFormats = document.querySelector('p.other-formats');
+
     if (otherFormats) {
       var span = document.createElement('span');
       span.className = 'dg-export-link';
-      // Перемещаем ссылку только при её наличии, чтобы не прерывать инициализацию страницы.
+
+      // Перемещаем ссылку только при её наличии,
+      // чтобы не прерывать инициализацию страницы.
       var exportLink = linkContainer.querySelector('a');
+
       if (exportLink) {
         span.appendChild(exportLink);
         otherFormats.appendChild(span);
@@ -123,12 +197,13 @@ document.addEventListener('DOMContentLoaded', function() {
       submitButton.disabled = true;
     }
 
-    // Скрываем ссылку от предыдущего результата, если пользователь запустил генерацию повторно.
+    // Скрываем ссылку от предыдущего результата.
     $downloadContainer.hide();
     $downloadLink.attr('href', '#');
 
     try {
-      // Отправляем форму как multipart/form-data, включая загруженный шаблон.
+      // Отправляем форму как multipart/form-data,
+      // включая загруженный шаблон и выбранный режим форматирования.
       var response = await fetch(form.action, {
         method: 'POST',
         body: new FormData(form),
@@ -168,30 +243,39 @@ document.addEventListener('DOMContentLoaded', function() {
         DG.showExportMessage('warning', result.warnings);
       }
     } catch (error) {
-      // При сетевой ошибке сохраняем окно открытым и сообщаем пользователю об ошибке.
+      // При сетевой ошибке сохраняем окно открытым
+      // и сообщаем пользователю об ошибке.
       DG.showExportMessage(
         'error',
         error.message || 'Document generation failed.'
       );
     } finally {
-      // Разблокируем кнопку после завершения запроса, если форма ещё существует.
+      // Разблокируем кнопку после завершения запроса,
+      // если форма ещё существует.
       if (submitButton && document.body.contains(submitButton)) {
         submitButton.disabled = false;
       }
     }
   });
 
+
+  // Проверяем форму при изменении имени выходного файла.
   $(document).on('input', '#dg_file_name', function() {
     DG.updateInfo();
   });
 
+
+  // Пересчитываем состояние формы при изменении режима выгрузки.
   $(document).on('change', 'input[name="export_mode"]', function() {
     DG.updateInfo();
   });
 
+
+  // При выборе другого шаблона одновременно меняем доступность
+  // настройки форматирования «Описание».
   $(document).on('change', '#template_file', function() {
     DG.updateInfo();
   });
 
-  //v2609301241
+  //v2610081634
 });

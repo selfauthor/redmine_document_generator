@@ -12,6 +12,11 @@ module DocumentGenerator
       @parser_config = parser_config
       @error_behavior = error_behavior
       @template_text = @parser_config[:template_text] || ''
+
+      # Сохраняем режим форматирования Description для последующего
+      # использования WordRenderer/TemplateProcessor.
+      @description_format =
+        @parser_config[:description_format].to_s == 'redmine' ? 'redmine' : 'raw'
       # Общий массив предупреждений для всех обрабатываемых записей.
       @warnings = []
     end
@@ -79,6 +84,7 @@ module DocumentGenerator
       {
         'records' => records,
         'total_count' => records.size,
+        '__description_format' => @description_format,
         'totals' => [
           {
             'total_count' => records.size
@@ -238,6 +244,7 @@ module DocumentGenerator
       {
         'groups' => groups_array,
         'total_count' => all_valid_issues.size,
+        '__description_format' => @description_format,
         'totals' => [
           {
             'total_count' => all_valid_issues.size
@@ -555,4 +562,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610071413
+# v2610090936
