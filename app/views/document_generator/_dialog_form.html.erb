@@ -5,39 +5,44 @@
   <fieldset class="box">
     <legend><%= l('document_generator.export_parameters') %></legend>
 
-    <p>
-      <label for="template_file"><%= l('document_generator.template_file') %></label>
-      <%= file_field_tag 'template_file',
-                         accept: '.docx,.xlsx',
-                         required: true,
-                         id: 'template_file' %>
-      <span id="dg-template-error" class="error" style="display:none;">
-        <%= l('document_generator.error_invalid_format') %>
+    <p class="dg-form-row">
+      <label class="dg-form-label" for="template_file"><%= l('document_generator.template_file') %></label>
+      <span class="dg-form-control">
+        <%= file_field_tag 'template_file',
+                           accept: '.docx,.xlsx',
+                           required: true,
+                           id: 'template_file' %>
+        <span id="dg-template-error" class="error" style="display:none;">
+          <%= l('document_generator.error_invalid_format') %>
+        </span>
       </span>
     </p>
 
-    <p>
-      <label><%= l('document_generator.export_mode') %></label>
+    <p class="dg-form-row">
+      <label class="dg-form-label"><%= l('document_generator.export_mode') %></label>
+      <span class="dg-form-control">
+        <label class="block">
+          <%= radio_button_tag 'export_mode', 'single', true %>
+          <%= l('document_generator.export_mode_single') %>
+        </label>
 
-      <label class="block">
-        <%= radio_button_tag 'export_mode', 'single', true %>
-        <%= l('document_generator.export_mode_single') %>
-      </label>
-
-      <label class="block">
-        <%= radio_button_tag 'export_mode', 'combined' %>
-        <%= l('document_generator.export_mode_combined') %>
-      </label>
+        <label class="block">
+          <%= radio_button_tag 'export_mode', 'combined' %>
+          <%= l('document_generator.export_mode_combined') %>
+        </label>
+      </span>
     </p>
 
-    <p>
-      <label for="dg_file_name"><%= l('document_generator.file_name') %></label>
-      <%= text_field_tag 'file_name',
-                         l('document_generator.default_file_name', default: 'Export'),
-                         required: true,
-                         id: 'dg_file_name' %>
-      <span id="dg-filename-error" class="error" style="display:none;">
-        <%= l('document_generator.error_invalid_filename') %>
+    <p class="dg-form-row">
+      <label class="dg-form-label" for="dg_file_name"><%= l('document_generator.file_name') %></label>
+      <span class="dg-form-control">
+        <%= text_field_tag 'file_name',
+                           l('document_generator.default_file_name', default: 'Export'),
+                           required: true,
+                           id: 'dg_file_name' %>
+        <span id="dg-filename-error" class="error" style="display:none;">
+          <%= l('document_generator.error_invalid_filename') %>
+        </span>
       </span>
     </p>
   </fieldset>
@@ -45,39 +50,41 @@
   <fieldset class="box">
     <legend><%= l('document_generator.settings') %></legend>
 
-    <p>
-      <label><%= l('document_generator.description_format') %></label>
+    <p class="dg-form-row">
+      <label class="dg-form-label"><%= l('document_generator.description_format') %></label>
+      <span class="dg-form-control">
+        <label class="block">
+          <%= radio_button_tag 'description_format', 'raw', true, id: 'dg-description-format-raw' %>
+          <%= l('document_generator.description_format_raw') %>
+        </label>
 
-      <label class="block">
-        <%= radio_button_tag 'description_format', 'raw', true, id: 'dg-description-format-raw' %>
-        <%= l('document_generator.description_format_raw') %>
-      </label>
+        <label class="block" id="dg-description-format-redmine-label">
+          <%= radio_button_tag 'description_format',
+                               'redmine',
+                               false,
+                               id: 'dg-description-format-redmine' %>
+          <%= l('document_generator.description_format_redmine') %>
+        </label>
 
-      <label class="block" id="dg-description-format-redmine-label">
-        <%= radio_button_tag 'description_format',
-                             'redmine',
-                             false,
-                             id: 'dg-description-format-redmine' %>
-        <%= l('document_generator.description_format_redmine') %>
-      </label>
-
-      <span id="dg-description-format-disabled"
-            class="description"
-            style="display:none;">
-        <%= l('document_generator.description_format_word_only') %>
+        <span id="dg-description-format-disabled"
+              class="description"
+              style="display:none;">
+          <%= l('document_generator.description_format_word_only') %>
+        </span>
       </span>
     </p>
 
-    <p>
-      <label for="error_behavior"><%= l('document_generator.error_behavior') %></label>
-
-      <%= select_tag 'error_behavior',
-                     options_for_select([
-                       [l('document_generator.error_abort'), 'abort'],
-                       [l('document_generator.error_skip_field'), 'skip_field'],
-                       [l('document_generator.error_skip_record'), 'skip_record']
-                     ]),
-                     id: 'error_behavior' %>
+    <p class="dg-form-row">
+      <label class="dg-form-label" for="error_behavior"><%= l('document_generator.error_behavior') %></label>
+      <span class="dg-form-control">
+        <%= select_tag 'error_behavior',
+                       options_for_select([
+                         [l('document_generator.error_abort'), 'abort'],
+                         [l('document_generator.error_skip_field'), 'skip_field'],
+                         [l('document_generator.error_skip_record'), 'skip_record']
+                       ]),
+                       id: 'error_behavior' %>
+      </span>
     </p>
   </fieldset>
 

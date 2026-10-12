@@ -1024,12 +1024,86 @@ module DocumentGenerator
           description_format
         )
 
-        replace_inline_marker(
-          text_node,
-          marker_match,
-          replacement_nodes,
-          run
-        )
+        # Проверяем, содержат ли узлы замены блочные элементы
+        # (w:p, w:tbl). Блочные элементы WordprocessingML нельзя
+        # помещать внутрь w:p — это нарушает структуру документа
+        # и делает файл нечитаемым для Word.
+        has_block_nodes = replacement_nodes.any? do |node|
+          %w[w:p w:tbl].include?(node.name)
+        end
+
+        if has_block_nodes
+          # Определяем текст до и после маркера в текущем
+          # текстовом узле, чтобы корректно разделить абзац.
+          before_text = text_node.text[0...marker_match.begin(0)]
+          after_text  = text_node.text[(marker_match.end(0))..]
+
+          # Сохраняем свойства форматирования run (w:rPr) до его
+          # возможного удаления — они понадобятся для after_text.
+          r_pr = run.at_xpath('w:rPr', ns)
+
+          # Модифицируем текстовый узел: оставляем только текст
+          # до маркера. Если текста до маркера нет — удаляем узел.
+          if before_text.empty?
+            text_node.remove
+          else
+            text_node.content = before_text
+            if before_text.match?(/\A\s|\s\z/)
+              text_node['xml:space'] = 'preserve'
+            end
+          end
+
+          # Удаляем run, если в нём не осталось дочерних элементов.
+          run.remove if run.children.empty?
+
+          # Вставляем блочные узлы как братьев исходного абзаца
+          # (на уровень w:body или w:tc, а не внутрь w:p).
+          insertion_point = paragraph
+          replacement_nodes.each do |node|
+            insertion_point.add_next_sibling(node)
+            insertion_point = node
+          end
+
+          # Если после маркера был текст, создаём для него
+          # новый абзац и вставляем после блочных узлов.
+          unless after_text.empty?
+            new_p = Nokogiri::XML::Node.new(
+              'w:p', paragraph.document
+            )
+            # Копируем свойства исходного абзаца (w:pPr).
+            p_pr = paragraph.at_xpath('w:pPr', ns)
+            new_p.add_child(p_pr.dup) if p_pr
+            new_run = Nokogiri::XML::Node.new(
+              'w:r', paragraph.document
+            )
+            # Копируем свойства исходного run (w:rPr).
+            new_run.add_child(r_pr.dup) if r_pr
+            new_t = Nokogiri::XML::Node.new(
+              'w:t', paragraph.document
+            )
+            new_t.content = after_text
+            if after_text.match?(/\A\s|\s\z/)
+              new_t['xml:space'] = 'preserve'
+            end
+            new_run.add_child(new_t)
+            new_p.add_child(new_run)
+            insertion_point.add_next_sibling(new_p)
+          end
+
+          # Если исходный абзац стал пустым (не содержит
+          # прогонов w:r), удаляем его, чтобы не оставлять
+          # пустых абзацев в документе.
+          paragraph.remove unless paragraph.at_xpath('.//w:r', ns)
+        else
+          # Все узлы инлайновые (w:r) — используем стандартную
+          # замену внутри абзаца.
+          replace_inline_marker(
+            text_node,
+            marker_match,
+            replacement_nodes,
+            run
+          )
+        end
       end
     end
 
@@ -1657,13 +1731,12 @@ module DocumentGenerator
       is_total = function_name.start_with?('total_')
       aggregate_name = function_name.sub(/\Atotal_/, '')
 
-      # Общие агрегаты используют total_agg_.
-      # Вложенная группа второго уровня использует group_2_agg_.
-      # Первая группа использует group_agg_.
+      # Определяем префикс для ключа агрегатной функции в зависимости от уровня группировки.
+      # '__group_level' устанавливается в ContextBuilder при формировании контекста групп.
       prefix =
         if is_total
           'total_agg_'
-        elsif context.key?('GroupValue2')
+        elsif context['__group_level'] == 2
           'group_2_agg_'
         else
           'group_agg_'
@@ -1796,29 +1869,35 @@ module DocumentGenerator
       )
     end
 
-    # ==========================================================================
-    # РАБОТА С АРХИВАМИ
-    # ==========================================================================
-    # Обрабатывает архив .docx/.xlsx, извлекая указанные XML-файлы
+    # Обрабатывает архив .docx/.xlsx, извлекая и модифицируя указанные XML-файлы.
     #
-    # @param input_path [String] Путь к исходному шаблону
-    # @param output_path [String] Путь для сохранения результата
-    # @param xml_targets [Array<String>] Маски имен файлов внутри архива
-    # @yield [Nokogiri::XML::Document, String] Блок получает документ и имя файла
+    # @param input_path [String] Путь к исходному шаблону.
+    # @param output_path [String] Путь для сохранения результата.
+    # @param xml_targets [Array<String>] Маски имен файлов внутри архива для обработки.
+    # @yield [Nokogiri::XML::Document, String] Блок получает документ и имя файла.
+    # @return [void]
     def self.process_archive(input_path, output_path, xml_targets)
       require 'zip'
       Zip::File.open(input_path) do |zip_file|
         Zip::File.open(output_path, Zip::File::CREATE) do |out_zip|
           zip_file.each do |entry|
-            out_zip.get_output_stream(entry.name) do |os|
-              os.write(zip_file.read(entry.name))
-            end
+            # Проверяем, подлежит ли текущий файл обработке как XML-шаблон.
             if xml_targets.any? { |target| File.fnmatch(target, entry.name) }
               xml_content = zip_file.read(entry.name)
               doc = Nokogiri::XML(xml_content)
+              
+              # Передаем документ в блок для модификации (подстановка маркеров и т.д.).
               yield(doc, entry.name)
+              
+              # Записываем модифицированный XML обратно в архив.
               out_zip.get_output_stream(entry.name) do |os|
                 os.write(doc.to_xml(indent: 0, save_with: Nokogiri::XML::Node::SaveOptions::AS_XML))
+              end
+            else
+              # Файлы, не требующие обработки (изображения, стили и т.д.), 
+              # копируются без изменений. Это предотвращает двойную запись и повреждение архива.
+              out_zip.get_output_stream(entry.name) do |os|
+                os.write(zip_file.read(entry.name))
               end
             end
           end
@@ -1826,9 +1905,6 @@ module DocumentGenerator
       end
     end
 
-    # ==========================================================================
-    # ОБРАБОТКА КОЛЛЕКЦИЙ (ПОДЗАДАЧИ, НАБЛЮДАТЕЛИ, СВЯЗИ)
-    # ==========================================================================
     # Разворачивает блоки коллекций подзадач, наблюдателей и связей.
     #
     # @param block_nodes [Array<Nokogiri::XML::Node>, Nokogiri::XML::Node] XML-узлы блока.
@@ -1945,12 +2021,14 @@ module DocumentGenerator
         collection_data =
           context[config[:context_key]] || []
 
-        # Для BEGIN_RELATIONS:тип оставляем только связи указанного типа.
+        # Для BEGIN_RELATIONS допускается фильтрация по типу связи.
+        # Ключ приводится к нижнему регистру, так как в ContextBuilder 
+        # он сохраняется именно в нижнем регистре для регистронезависимого поиска.
         if marker_base == 'RELATIONS' && relation_type.present?
           relation_type_key = I18n.t(
             'document_generator.relation_type',
             default: 'Relation Type'
-          )
+          ).to_s.downcase
 
           collection_data = collection_data.select do |item|
             item.is_a?(Hash) &&
@@ -2183,4 +2261,4 @@ module DocumentGenerator
 
   end
 end
-# v2610090931
+# v2610091115

@@ -169,9 +169,13 @@ module DocumentGenerator
           record['row_number_in_group'] = index + 1
         end
 
+        # Формируем контекст группы первого уровня.
+        # Ключ '__group_level' используется TemplateProcessor для правильного 
+        # выбора префикса агрегатных функций (group_agg_).
         group_context = {
           'count' => records.size,
-          'records' => records
+          'records' => records,
+          '__group_level' => 1
         }
 
         # Значение группировки сохраняем под именем соответствующего поля.
@@ -208,11 +212,13 @@ module DocumentGenerator
               record['row_number_in_group_2'] = index + 1
             end
 
-            # Формируем контекст внутренней группы.
-            # Значение группировки доступно по имени поля, по которому выполняется группировка.
+            # Формируем контекст внутренней группы второго уровня.
+            # Ключ '__group_level' используется TemplateProcessor для правильного 
+            # выбора префикса агрегатных функций (group_2_agg_).
             second_group_context = {
               'count' => second_records.size,
-              'records' => second_records
+              'records' => second_records,
+              '__group_level' => 2
             }
 
             # Значение второй группировки сохраняем под именем соответствующего поля.
@@ -335,14 +341,13 @@ module DocumentGenerator
         hash[field_name] = self.class.format_value(value)
       end
 
-      # Формируем контекст подзадач.
-      hash['subtasks'] = Issue.where(parent_id: issue.id)
-                              .includes(
-                                :status,
-                                :assigned_to,
-                                custom_values: :custom_field
-                              )
-                              .map do |child|
+      # Формируем контекст подзадач, используя уже загруженную ассоциацию children,
+      # что предотвращает выполнение дополнительных N+1 запросов к базе данных.
+      hash['subtasks'] = issue.children.includes(
+                           :status,
+                           :assigned_to,
+                           custom_values: :custom_field
+                         ).map do |child|
         subtask_hash = {
           '__issue' => child,
           'id' => child.id,
@@ -562,4 +567,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610090936
+# v2610091004

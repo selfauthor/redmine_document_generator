@@ -30,3 +30,55 @@
   margin-left: 4px;
   overflow-wrap: anywhere;
 }
+
+/* Двухколоночная компоновка строк в блоках параметров выгрузки и настроек. */
+#document-generator-form .dg-form-row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+/* Левая колонка: подписи полей выровнены по правому краю. */
+#document-generator-form .dg-form-label {
+  display: block;
+  margin: 0;
+  padding-top: 4px;
+  text-align: right;
+}
+
+/* Правая колонка: поля и радиокнопки начинаются у одной вертикальной линии. */
+#document-generator-form .dg-form-control {
+  display: block;
+  min-width: 0;
+  text-align: left;
+}
+
+/* Поля ввода не должны выходить за пределы правой колонки. */
+#document-generator-form .dg-form-control input[type="file"],
+#document-generator-form .dg-form-control input[type="text"],
+#document-generator-form .dg-form-control select {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Варианты выбора располагаются вертикально внутри правой колонки. */
+#document-generator-form .dg-form-control > label.block {
+  display: block;
+  margin: 0;
+  text-align: left;
+}
+
+/* На узких экранах подпись располагается над полем, чтобы сохранить читаемость. */
+@media screen and (max-width: 600px) {
+  #document-generator-form .dg-form-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 4px;
+  }
+
+  #document-generator-form .dg-form-label {
+    padding-top: 0;
+    text-align: left;
+  }
+}

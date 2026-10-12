@@ -102,6 +102,13 @@ module DocumentGenerator
       html = redmine_html
 
       fragment = Nokogiri::HTML.fragment(html)
+      # Удаляем служебные ссылки-якоря Redmine, которые отображаются
+      # символом ¶ и не должны попадать в сформированный документ.
+      fragment.css('a.wiki-anchor, a.anchor').remove
+
+      # Удаляем пустые якоря, оставшиеся после удаления служебных ссылок.
+      fragment.css('a[id]:empty, a[name]:empty').remove
+
       run_properties = marker_run.at_xpath('w:rPr', word_namespaces)
 
       # Если описание пустое, удаляем только содержимое маркера.
@@ -135,18 +142,41 @@ module DocumentGenerator
 
     # Формирует Word-узлы для блочного HTML.
     #
-    # Каждый HTML-абзац преобразуется в отдельный w:p.
-    # Таблица преобразуется в настоящий w:tbl.
+    # Каждый HTML-блок преобразуется в отдельный элемент Word.
+    # Обычный текст между блоками сохраняется как самостоятельный абзац.
     #
     # @param fragment [Nokogiri::HTML::DocumentFragment] HTML-фрагмент.
     # @param source_paragraph [Nokogiri::XML::Node] Исходный w:p.
-    # @param base_run_properties [Nokogiri::XML::Node, nil] Форматирование маркера.
+    # @param base_run_properties [Nokogiri::XML::Node, nil] Базовое форматирование текста.
     # @return [Array<Nokogiri::XML::Node>] Набор блоков Word.
     def build_block_nodes(fragment, source_paragraph, base_run_properties)
       nodes = []
 
       fragment.children.each do |child|
+        # Пропускаем только пустые текстовые узлы, сохраняя непустой текст.
         next if child.text? && child.text.strip.empty?
+
+        # Обычный текст между блочными элементами сохраняем как отдельный абзац.
+        # Удаляем пробельные символы по краям: переводы строк и табуляции,
+        # которыми Redmine разделяет HTML-блоки, не должны попадать в Word.
+        if child.text?
+          text = child.text.strip
+
+          # Пропускаем пустые узлы, содержащие только пробелы,
+          # переводы строк или табуляции.
+          next if text.empty?
+
+          # Создаём отдельный текстовый узел без служебных символов
+          # по краям, сохраняя исходное содержимое строки.
+          text_node = Nokogiri::XML::Text.new(text, @document)
+
+          nodes << build_paragraph(
+            text_node,
+            source_paragraph,
+            base_run_properties
+          )
+          next
+        end
 
         case child.name.downcase
         when 'table'
@@ -272,41 +302,46 @@ module DocumentGenerator
       nodes
     end
 
-    # Формирует один Word-абзац.
+    # Формирует абзац Word и назначает стиль заголовка, если HTML-узел является заголовком.
     #
     # @param html_node [Nokogiri::XML::Node] HTML-блочный узел.
     # @param source_paragraph [Nokogiri::XML::Node] Исходный абзац шаблона.
     # @param base_properties [Nokogiri::XML::Node, nil] Форматирование маркера.
-    # @return [Nokogiri::XML::Node] w:p.
+    # @return [Nokogiri::XML::Node] Сформированный абзац w:p.
     def build_paragraph(html_node, source_paragraph, base_properties)
       paragraph = Nokogiri::XML::Node.new('w:p', @document)
 
+      # Сохраняем настройки исходного абзаца, включая отступы и выравнивание.
       source_ppr = source_paragraph.at_xpath('w:pPr', word_namespaces)
       paragraph.add_child(source_ppr.dup) if source_ppr
 
-      heading_level =
-        if html_node.name.downcase.match?(/\Ah([1-6])\z/)
-          Regexp.last_match(1).to_i
-        end
+      # Определяем уровень заголовка. Поддерживаются только уровни 1–3.
+      heading_match = html_node.name.downcase.match(/\Ah([1-3])\z/)
+      heading_level = heading_match ? heading_match[1].to_i : nil
 
       if heading_level
         ppr = paragraph.at_xpath('w:pPr', word_namespaces)
 
         unless ppr
           ppr = Nokogiri::XML::Node.new('w:pPr', @document)
-          paragraph.add_child(ppr)
+          paragraph.children.first ? paragraph.children.first.add_previous_sibling(ppr) : paragraph.add_child(ppr)
         end
 
+        # Удаляем старый стиль, если он был задан в исходном абзаце.
+        ppr.xpath('w:pStyle', word_namespaces).remove
+
+        # Назначаем стандартный идентификатор стиля Word.
         p_style = Nokogiri::XML::Node.new('w:pStyle', @document)
         p_style['w:val'] = "Heading#{heading_level}"
-        ppr.add_child(p_style)
+        ppr.children.first ? ppr.children.first.add_previous_sibling(p_style) : ppr.add_child(p_style)
       end
 
-      html_node.children.each do |child|
-        build_inline_node(
-          child,
-          base_properties
-        ).each do |word_node|
+      # Преобразуем содержимое абзаца с сохранением inline-форматирования.
+      # Для текстового узла обрабатываем сам узел, поскольку у него нет детей.
+      content_nodes = html_node.text? ? [html_node] : html_node.children
+
+      content_nodes.each do |child|
+        build_inline_node(child, base_properties).each do |word_node|
           paragraph.add_child(word_node)
         end
       end
@@ -314,37 +349,89 @@ module DocumentGenerator
       paragraph
     end
 
-    # Формирует список Word.
+    # Формирует нативный маркированный или нумерованный список Word.
     #
-    # Для независимости от настроек numbering.xml используется визуальный
-    # маркер списка в виде обычного текста, при этом каждый пункт остаётся
-    # отдельным абзацем Word.
-    #
-    # @param list_node [Nokogiri::XML::Node] HTML ul/ol.
+    # @param list_node [Nokogiri::XML::Node] HTML-узел ul или ol.
     # @param ordered [Boolean] true для нумерованного списка.
     # @param source_paragraph [Nokogiri::XML::Node] Исходный абзац шаблона.
-    # @param base_properties [Nokogiri::XML::Node, nil] Базовое форматирование.
-    # @return [Array<Nokogiri::XML::Node>] Абзацы списка.
+    # @param base_properties [Nokogiri::XML::Node, nil] Базовое форматирование текста.
+    # @return [Array<Nokogiri::XML::Node>] Абзацы списка Word.
     def build_list(list_node, ordered, source_paragraph, base_properties)
       result = []
 
-      list_node.xpath('./li').each_with_index do |item, index|
-        paragraph = Nokogiri::XML::Node.new('w:p', @document)
+      # Назначаем каждому списку документа уникальный временный numId.
+      # Чётные идентификаторы предназначены для маркированных списков,
+      # нечётные — для нумерованных. Счётчик хранится в XML-документе,
+      # поэтому он общий для всех экземпляров DescriptionFormatter,
+      # работающих с одним документом.
+      list_counter = @document.instance_variable_get(
+        :@document_generator_list_counter
+      ).to_i + 1
 
+      @document.instance_variable_set(
+        :@document_generator_list_counter,
+        list_counter
+      )
+
+      temporary_id = 2_100_000_000 + list_counter * 2
+      temporary_id += 1 if ordered
+
+      # Защищаемся от выхода за диапазон допустимых значений w:numId.
+      if temporary_id > 2_147_483_647
+        raise 'Temporary Word list identifier limit exceeded'
+      end
+
+      num_id = temporary_id.to_s
+
+      # Получаем пространство имён Word из исходного XML-документа.
+      word_namespace = @document.at_xpath(
+        '//w:document',
+        word_namespaces
+      )&.namespace
+
+      # Без пространства имён создавать элементы WordprocessingML нельзя.
+      raise 'WordprocessingML namespace not found' unless word_namespace
+
+      list_node.xpath('./li').each do |item|
+        paragraph = Nokogiri::XML::Node.new('p', @document)
+        paragraph.namespace = word_namespace
+
+        # Копируем настройки исходного абзаца, сохраняя его оформление.
         source_ppr = source_paragraph.at_xpath('w:pPr', word_namespaces)
-        paragraph.add_child(source_ppr.dup) if source_ppr
 
-        marker_run = create_run(base_properties)
+        ppr = if source_ppr
+                source_ppr.dup
+              else
+                Nokogiri::XML::Node.new('pPr', @document).tap do |node|
+                  node.namespace = word_namespace
+                end
+              end
 
-        marker_text = ordered ? "#{index + 1}. " : "• "
-        append_text_to_run(marker_run, marker_text)
-        paragraph.add_child(marker_run)
+        # Убираем исходную нумерацию абзаца, чтобы она не конфликтовала
+        # с назначением списка, созданного из описания задачи.
+        ppr.xpath('w:numPr', word_namespaces).remove
 
+        # Назначаем абзацу временный идентификатор списка Word.
+        num_pr = Nokogiri::XML::Node.new('numPr', @document)
+        num_pr.namespace = word_namespace
+
+        ilvl = Nokogiri::XML::Node.new('ilvl', @document)
+        ilvl.namespace = word_namespace
+        ilvl['w:val'] = '0'
+
+        num_id_node = Nokogiri::XML::Node.new('numId', @document)
+        num_id_node.namespace = word_namespace
+        num_id_node['w:val'] = num_id
+
+        num_pr.add_child(ilvl)
+        num_pr.add_child(num_id_node)
+        ppr.add_child(num_pr)
+        paragraph.add_child(ppr)
+
+        # Формируем содержимое пункта без текстового маркера:
+        # маркер или номер будет сформирован средствами Word.
         item.children.each do |child|
-          build_inline_node(
-            child,
-            base_properties
-          ).each do |word_node|
+          build_inline_node(child, base_properties).each do |word_node|
             paragraph.add_child(word_node)
           end
         end
@@ -454,7 +541,7 @@ module DocumentGenerator
         ensure_toggle_property(properties, 'w:b')
       when 'em', 'i'
         ensure_toggle_property(properties, 'w:i')
-      when 'u'
+      when 'u', 'ins'
         ensure_underline_property(properties)
       when 's', 'del'
         ensure_toggle_property(properties, 'w:strike')
@@ -534,4 +621,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610081717
+# v2610121149
