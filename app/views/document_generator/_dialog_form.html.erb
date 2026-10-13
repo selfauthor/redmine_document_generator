@@ -103,9 +103,46 @@
            l('document_generator.files_count', count: @record_count) :
            l('document_generator.single_file') %>
     </p>
+
+  </fieldset>
+
+  <fieldset class="box">
+    <legend><%= l('document_generator.available_files') %></legend>
+
+    <% if @available_files.present? %>
+      <table class="list">
+        <thead>
+          <tr>
+            <th><%= l('document_generator.available_file_name') %></th>
+            <th><%= l('document_generator.available_file_created_at') %></th>
+            <th><%= l('document_generator.available_file_user') %></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @available_files.each do |file| %>
+            <tr>
+              <td>
+                <%= link_to file[:filename], file[:url] %>
+              </td>
+              <td>
+                <%= format_time(file[:created_at]) %>
+              </td>
+              <td>
+                <%= link_to_user(file[:user]) %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <p class="nodata">
+        <%= l('document_generator.no_available_files') %>
+      </p>
+    <% end %>
   </fieldset>
 
   <p class="buttons">
+
     <%= submit_tag l('document_generator.button_export'),
                    id: 'dg-submit-btn',
                    disabled: true,

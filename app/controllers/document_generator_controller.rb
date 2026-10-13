@@ -42,6 +42,9 @@ class DocumentGeneratorController < ApplicationController
 
     @record_count = @query.issue_count
 
+    # Получаем доступные результаты предыдущих выгрузок текущего проекта.
+    @available_files = available_export_files
+
     # Сохраняем параметры фильтра для передачи в export
     @filter_params = {
       'f' => @query.filters.keys,
@@ -470,6 +473,87 @@ class DocumentGeneratorController < ApplicationController
     Rails.root.join('tmp', 'document_generator').to_s
   end
 
+  # Возвращает список существующих результатов выгрузки текущего проекта.
+  # Учитываются только корректные метаданные, допустимые UUID и реально существующие файлы.
+  # @return [Array<Hash>] Список результатов с именем файла, временем создания,
+  #   пользователем и URL защищённого скачивания.
+  def available_export_files
+    # Каталог может отсутствовать, если генератор ещё ни разу не запускался.
+    storage_root = export_root_dir
+    return [] unless Dir.exist?(storage_root)
+
+    files = []
+
+    # Просматриваем только непосредственные подкаталоги хранилища.
+    Dir.children(storage_root).each do |entry|
+      # Имя каталога должно быть UUID, чтобы исключить обработку произвольных путей.
+      next unless entry.match?(
+        /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+      )
+
+      export_dir = File.join(storage_root, entry)
+
+      # Не обрабатываем файлы и символические ссылки вместо каталогов.
+      next unless File.directory?(export_dir) && !File.symlink?(export_dir)
+
+      metadata_path = File.join(export_dir, 'metadata.json')
+
+      # Пропускаем каталоги без метаданных.
+      next unless File.file?(metadata_path)
+
+      begin
+        # Загружаем метаданные завершённой выгрузки.
+        metadata = JSON.parse(File.read(metadata_path, mode: 'r:UTF-8'))
+
+        # Метаданные должны содержать объект с ожидаемым UUID и ID проекта.
+        next unless metadata.is_a?(Hash)
+        next unless metadata['uuid'] == entry
+        next unless metadata['project_id'].to_i == @project.id
+
+        # Проверяем имя файла и разрешённое расширение.
+        filename = metadata['filename'].to_s
+        extension = File.extname(filename).downcase
+
+        next if filename.blank? || filename =~ %r{[\\/:*?"<>|]}
+        next unless %w[.docx .xlsx .zip].include?(extension)
+
+        # Физическое имя результата формируется по UUID и расширению.
+        file_path = File.join(export_dir, "#{entry}#{extension}")
+
+        # Не показываем ссылки на отсутствующие файлы.
+        next unless File.file?(file_path)
+
+        # Преобразуем время из metadata.json в объект времени Rails.
+        created_at = Time.zone.parse(metadata['created_at'].to_s)
+        next unless created_at
+
+        # Получаем автора выгрузки; запись пользователя могла быть удалена.
+        user = User.find_by(id: metadata['user_id'])
+        next unless user
+
+        files << {
+          filename: filename,
+          created_at: created_at,
+          user: user,
+          url: download_document_generator_export_path(
+            project_id: @project.identifier,
+            uuid: entry
+          )
+        }
+      rescue JSON::ParserError, ArgumentError, TypeError, Errno::ENOENT => e
+        # Повреждение одной папки не должно мешать отображению остальных результатов.
+        Rails.logger.warn(
+          "[DocumentGenerator] Skipping invalid export metadata " \
+          "#{metadata_path}: #{e.message}"
+        )
+        next
+      end
+    end
+
+    # Сначала показываем последние созданные документы.
+    files.sort_by { |file| file[:created_at] }.reverse
+  end
+
   # Внутренний метод контроллера.
   # Удаляет каталоги результатов, чей mtime старше заданного срока хранения.
   # Срок хранения задаётся в часах в настройках плагина.
@@ -523,4 +607,4 @@ class DocumentGeneratorController < ApplicationController
   end
 
 end
-# v2610090944
+# v2610131349
