@@ -158,6 +158,129 @@ DG.showExportMessage = function(type, message) {
   }
 };
 
+/**
+ * Создаёт полноэкранный слой прогресса поверх модального окна.
+ * form — форма генерации с локализованными data-атрибутами.
+ */
+DG.showProgressOverlay = function(form) {
+  DG.hideProgressOverlay();
+
+  var overlay = document.createElement('div');
+  overlay.id = 'dg-progress-overlay';
+  overlay.className = 'dg-progress-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-live', 'polite');
+
+  var panel = document.createElement('div');
+  panel.className = 'dg-progress-panel';
+
+  var title = document.createElement('h3');
+  title.className = 'dg-progress-title';
+  title.textContent = form.dataset.progressTitle;
+
+  var stage = document.createElement('div');
+  stage.id = 'dg-progress-stage';
+  stage.className = 'dg-progress-stage';
+  stage.textContent =
+    form.dataset.progressStagePreparing + ': ' +
+    form.dataset.progressPreparing;
+
+  var track = document.createElement('div');
+  track.className = 'dg-progress-track';
+  track.setAttribute('role', 'progressbar');
+  track.setAttribute('aria-valuemin', '0');
+  track.setAttribute('aria-valuemax', '100');
+  track.setAttribute('aria-valuenow', '0');
+
+  var bar = document.createElement('div');
+  bar.id = 'dg-progress-bar';
+  bar.className = 'dg-progress-bar';
+  track.appendChild(bar);
+
+  var percent = document.createElement('div');
+  percent.id = 'dg-progress-percent';
+  percent.className = 'dg-progress-percent';
+  percent.textContent = '0%';
+
+  var message = document.createElement('p');
+  message.id = 'dg-progress-message';
+  message.className = 'dg-progress-message';
+  message.textContent = form.dataset.progressWait;
+
+  panel.appendChild(title);
+  panel.appendChild(stage);
+  panel.appendChild(track);
+  panel.appendChild(percent);
+  panel.appendChild(message);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  return overlay;
+};
+
+/**
+ * Обновляет индикатор по состоянию, полученному от контроллера.
+ * state — объект состояния операции; form — форма с локализованными надписями.
+ */
+DG.updateProgressOverlay = function(state, form) {
+  var percent = Math.max(0, Math.min(100, parseInt(state.percent, 10) || 0));
+  var bar = document.getElementById('dg-progress-bar');
+  var track = bar && bar.parentElement;
+  var percentLabel = document.getElementById('dg-progress-percent');
+  var stageLabel = document.getElementById('dg-progress-stage');
+  var messageLabel = document.getElementById('dg-progress-message');
+
+  if (bar) {
+    bar.style.width = percent + '%';
+  }
+
+  if (track) {
+    track.setAttribute('aria-valuenow', String(percent));
+  }
+
+  if (percentLabel) {
+    percentLabel.textContent = percent + '%';
+  }
+
+  if (stageLabel) {
+    stageLabel.textContent = state.stage === 'rendering'
+      ? form.dataset.progressStageRendering + ': ' + form.dataset.progressRendering
+      : form.dataset.progressStagePreparing + ': ' + form.dataset.progressPreparing;
+  }
+
+  if (messageLabel) {
+    messageLabel.textContent = state.message || form.dataset.progressWait;
+  }
+};
+
+/**
+ * Удаляет слой прогресса после завершения операции.
+ */
+DG.hideProgressOverlay = function() {
+  var overlay = document.getElementById('dg-progress-overlay');
+
+  if (overlay) {
+    overlay.remove();
+  }
+};
+
+/**
+ * Закрывает модальное окно, показывает ошибку в Redmine и прокручивает страницу вверх.
+ * form — форма генерации; message — локализованный текст ошибки.
+ */
+DG.finishExportWithError = function(form, message) {
+  DG.hideProgressOverlay();
+
+  if (typeof hideModal === 'function') {
+    hideModal(form.querySelector('#dg-submit-btn') || form);
+  } else if ($('#ajax-modal').length && $('#ajax-modal').dialog) {
+    $('#ajax-modal').dialog('close');
+  }
+
+  DG.showExportMessage('error', message);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
 
 document.addEventListener('DOMContentLoaded', function() {
   // Перемещение ссылки в блок экспорта.
@@ -183,7 +306,8 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
 
-  // Отправляет форму генерации и отображает ссылку на защищённое скачивание.
+
+  // Отправляет форму, опрашивает серверный прогресс и обрабатывает результат.
   $(document).on('submit', '#document-generator-form', async function(event) {
     event.preventDefault();
 
@@ -192,21 +316,89 @@ document.addEventListener('DOMContentLoaded', function() {
     var $downloadContainer = $('#dg-download-link-container');
     var $downloadLink = $('#dg-download-link');
 
-    // Блокируем повторную отправку формы на время генерации.
+    // Генерируем UUID заранее, чтобы POST и GET использовали одну операцию.
+    var progressUuid = (window.crypto && typeof window.crypto.randomUUID === 'function')
+      ? window.crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(character) {
+          var random = Math.random() * 16 | 0;
+          var value = character === 'x' ? random : (random & 0x3 | 0x8);
+          return value.toString(16);
+        });
+
+    var pollTimer = null;
+    var pollBusy = false;
+
+    // Останавливает опрос и удаляет индикатор.
+    function stopProgressPolling() {
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      DG.hideProgressOverlay();
+    }
+
+    // Получает последнее состояние операции.
+    // Повторная попытка выполняется по следующему таймеру при сетевой ошибке.
+    async function pollProgress() {
+      if (pollBusy) return;
+
+      pollBusy = true;
+
+      try {
+        var progressUrl = new URL(form.action, window.location.href);
+
+        // Сохраняем исходный адрес проекта и заменяем только конечный маршрут.
+        progressUrl.pathname = progressUrl.pathname.replace(
+          /\/export$/,
+          '/progress/' + progressUuid
+        );
+
+        var progressResponse = await fetch(progressUrl.toString(), {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        });
+
+        // Файл состояния может ещё не существовать при самом первом запросе.
+        if (!progressResponse.ok) return;
+
+        var progressState = await progressResponse.json();
+
+        if (progressState.status !== 'pending') {
+          DG.updateProgressOverlay(progressState, form);
+        }
+      } catch (pollError) {
+        // Ошибка отдельного GET-запроса не прерывает генерацию.
+      } finally {
+        pollBusy = false;
+      }
+    }
+
+    // Блокируем повторную отправку и скрываем ссылку от предыдущей операции.
     if (submitButton) {
       submitButton.disabled = true;
     }
 
-    // Скрываем ссылку от предыдущего результата.
     $downloadContainer.hide();
     $downloadLink.attr('href', '#');
 
+    DG.showProgressOverlay(form);
+
+    // Первый опрос выполняется сразу, последующие — раз в секунду.
+    pollProgress();
+    pollTimer = window.setInterval(pollProgress, 1000);
+
     try {
-      // Отправляем форму как multipart/form-data,
-      // включая загруженный шаблон и выбранный режим форматирования.
+      var formData = new FormData(form);
+      formData.set('progress_uuid', progressUuid);
+
       var response = await fetch(form.action, {
         method: 'POST',
-        body: new FormData(form),
+        body: formData,
         credentials: 'same-origin',
         headers: {
           'Accept': 'application/json',
@@ -222,42 +414,41 @@ document.addEventListener('DOMContentLoaded', function() {
         result = {};
       }
 
-      // Обрабатываем ошибки генерации, не закрывая модальное окно.
+      // При любой ошибке убираем индикатор и закрываем модальное окно.
       if (!response.ok || result.type !== 'success' || !result.download_url) {
-        var errorMessage = result.message || result.error || 'Document generation failed.';
-        DG.showExportMessage('error', errorMessage);
+        DG.finishExportWithError(
+          form,
+          result.message || result.error || form.dataset.progressError
+        );
         return;
       }
 
-      // Устанавливаем полученную от сервера ссылку для ручного запуска скачивания.
+      // Успешное завершение: закрываем опрос, но оставляем диалог открытым.
+      stopProgressPolling();
+
       $downloadLink.attr('href', result.download_url);
       $downloadLink.attr('download', result.filename || '');
       $downloadContainer.show();
 
-      // Запускаем скачивание сразу после получения ссылки.
-      // Окно остаётся открытым, чтобы пользователь мог воспользоваться ссылкой повторно.
+      // Сохраняем существующий механизм автоматического скачивания.
       window.location.href = result.download_url;
 
-      // Показываем предупреждения генератора, если они были возвращены сервером.
+      // Показываем предупреждения, возвращённые сервером.
       if (Array.isArray(result.warnings) && result.warnings.length > 0) {
         DG.showExportMessage('warning', result.warnings);
       }
     } catch (error) {
-      // При сетевой ошибке сохраняем окно открытым
-      // и сообщаем пользователю об ошибке.
-      DG.showExportMessage(
-        'error',
-        error.message || 'Document generation failed.'
-      );
+      // Сетевая ошибка также приводит к закрытию окна и сообщению на странице.
+      DG.finishExportWithError(form, form.dataset.progressError);
     } finally {
-      // Разблокируем кнопку после завершения запроса,
-      // если форма ещё существует.
+      // Дополнительная очистка гарантирует отсутствие индикатора после завершения.
+      stopProgressPolling();
+
       if (submitButton && document.body.contains(submitButton)) {
         submitButton.disabled = false;
       }
     }
   });
-
 
   // Проверяем форму при изменении имени выходного файла.
   $(document).on('input', '#dg_file_name', function() {
@@ -277,5 +468,5 @@ document.addEventListener('DOMContentLoaded', function() {
     DG.updateInfo();
   });
 
-  //v2610081634
+  //v2610131609
 });

@@ -24,7 +24,8 @@ module DocumentGenerator
       issues,
       parser_config,
       error_behavior,
-      description_format = 'raw'
+      description_format = 'raw',
+      progress_callback = nil
     )
       @template_path = template_path
       @issues = issues
@@ -41,6 +42,7 @@ module DocumentGenerator
       )
 
       @warnings = []
+      @progress_callback = progress_callback
     end
 
     # Генерация документа
@@ -49,7 +51,12 @@ module DocumentGenerator
     # @raise [RenderError] если произошла ошибка при рендеринге
     def render
       # Строим контекст данных
-      context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
+      context = ContextBuilder.new(
+        @issues,
+        @parser_config,
+        @error_behavior,
+        @progress_callback
+      ).build
 
       # Используем тот же массив предупреждений, который создал ContextBuilder.
       # Благодаря общей ссылке предупреждения из обработки полей будут доступны renderer.
@@ -69,6 +76,9 @@ module DocumentGenerator
 
       # Добавляем определения стилей и нумерации, необходимые форматтеру описания.
       ensure_word_formatting_support(output_path)
+
+      # Сообщаем о завершении формирования выходного документа.
+      @progress_callback.call(:render_complete, 1.0) if @progress_callback
 
       output_path
     rescue StandardError => e
@@ -774,4 +784,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610131122
+# v2610131547

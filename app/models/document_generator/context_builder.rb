@@ -4,11 +4,17 @@ module DocumentGenerator
   # Класс отвечает за подготовку структурированных данных (контекста) 
   # из массива записей для последующей передачи в рендереры (Word/Excel).
   class ContextBuilder
-    # @param issues [ActiveRecord::Relation] Выборка записей
-    # @param parser_config [Hash] Конфигурация из TemplateParser
-    # @param error_behavior [String] Стратегия обработки ошибок ('abort', 'skip_field', 'skip_record')
-    def initialize(issues, parser_config, error_behavior)
+
+    # Инициализирует построитель контекста и подключает необязательное отслеживание прогресса.
+    # @param issues [Array<Issue>] Задачи для обработки.
+    # @param parser_config [Hash] Конфигурация шаблона.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @param progress_callback [Proc, nil] Callback события и доли выполненной работы.
+    def initialize(issues, parser_config, error_behavior, progress_callback = nil)
       @issues = issues
+      @progress_callback = progress_callback
+      @processed_issue_count = 0
+      @progress_issue_total = @issues.respond_to?(:size) ? @issues.size : @issues.to_a.size
       @parser_config = parser_config
       @error_behavior = error_behavior
       @template_text = @parser_config[:template_text] || ''
@@ -21,19 +27,25 @@ module DocumentGenerator
       @warnings = []
     end
 
-    # Основной метод: возвращает готовый хэш данных
-    # @return [Hash] Структурированный контекст для шаблонизатора
+    # Строит контекст выгрузки и сообщает о завершении подготовки данных.
+    # @return [Hash] Структурированный контекст для шаблонизатора.
     def build
-      if @parser_config[:group_by]
-        build_grouped_context
-      else
-        build_flat_context
-      end
+      result = if @parser_config[:group_by]
+                 build_grouped_context
+               else
+                 build_flat_context
+               end
+
+      # После подготовки контекста начинается формирование выходного файла.
+      @progress_callback.call(:context_complete, 1.0) if @progress_callback
+      result
     rescue DocumentGenerator::TemplateError => e
       raise e
     rescue StandardError => e
       Rails.logger.error "[DocumentGenerator] Context build failed: #{e.message}"
-      handle_error(I18n.t('document_generator.error_context_build_failed', message: e.message))
+      handle_error(
+        I18n.t('document_generator.error_context_build_failed', message: e.message)
+      )
     end
 
     # Форматирует значение для безопасного вывода в шаблон
@@ -66,6 +78,7 @@ module DocumentGenerator
       @issues.each do |issue|
         begin
           record = build_issue_hash(issue)
+          report_context_progress
 
           # При отсутствии GROUP_BY вся выборка считается одной группой.
           # Поэтому сквозной номер записи одновременно является номером
@@ -152,6 +165,9 @@ module DocumentGenerator
         group_issues.each do |issue|
           begin
             record = build_issue_hash(issue)
+
+            # Обновляем прогресс после успешного построения контекста задачи.
+            report_context_progress
 
             global_row_number += 1
             record['row_number'] = global_row_number
@@ -261,6 +277,21 @@ module DocumentGenerator
         'ProjectName' => @issues.first&.project&.name || '',
         '__warnings' => @warnings
       }
+    end
+
+    # Передаёт долю подготовленных задач в механизм отображения прогресса.
+    # Вызывается после построения контекста очередной основной задачи.
+    # @return [void]
+    def report_context_progress
+      return unless @progress_callback
+
+      @processed_issue_count += 1
+      total = [@progress_issue_total.to_i, 1].max
+
+      @progress_callback.call(
+        :context_progress,
+        @processed_issue_count.to_f / total
+      )
     end
 
     # Формирует полный набор полей задачи, общий для всех типов контекста.
@@ -559,4 +590,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610121635
+# v2610131544

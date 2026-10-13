@@ -10,9 +10,14 @@ RedmineApp::Application.routes.draw do
          to: 'document_generator#export',
          as: 'document_generator_export'
 
+    # GET /projects/:project_id/document_generator/progress/:uuid
+    get 'progress/:uuid',
+        to: 'document_generator#progress',
+        as: 'progress_document_generator_export'
+
     get 'download/:uuid',
         to: 'document_generator#download',
         as: 'download_document_generator_export'
   end
 end
-# v2610011545
+# v2610131528

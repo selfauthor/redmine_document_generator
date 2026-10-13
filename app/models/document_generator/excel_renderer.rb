@@ -12,13 +12,13 @@ module DocumentGenerator
     # @return [Array<String>] Список предупреждений для пользователя.
     attr_reader :warnings
 
-    # Инициализирует рендерер Excel-документа.
-    #
-    # @param template_path [String] Путь к файлу шаблона.
-    # @param issues [Array<Issue>] Массив задач для выгрузки.
-    # @param parser_config [Hash] Конфигурация парсера.
-    # @param error_behavior [String] Поведение при ошибках.
-    def initialize(template_path, issues, parser_config, error_behavior)
+    # Инициализирует Excel-рендерер.
+    # @param template_path [String] Путь к шаблону XLSX.
+    # @param issues [Array<Issue>] Задачи для выгрузки.
+    # @param parser_config [Hash] Конфигурация шаблона.
+    # @param error_behavior [String] Стратегия обработки ошибок.
+    # @param progress_callback [Proc, nil] Callback обновления прогресса.
+    def initialize(template_path, issues, parser_config, error_behavior, progress_callback = nil)
       @template_path = template_path
       @issues = issues
       @parser_config = parser_config
@@ -26,6 +26,7 @@ module DocumentGenerator
 
       # Создаём массив для предупреждений текущей выгрузки.
       @warnings = []
+      @progress_callback = progress_callback
     end
 
     # Генерирует Excel-документ из шаблона.
@@ -34,7 +35,12 @@ module DocumentGenerator
     # @raise [RenderError] Если во время рендеринга произошла ошибка.
     def render
       # Формируем общий контекст данных для всех записей выгрузки.
-      context = ContextBuilder.new(@issues, @parser_config, @error_behavior).build
+      context = ContextBuilder.new(
+        @issues,
+        @parser_config,
+        @error_behavior,
+        @progress_callback
+      ).build
 
       # Используем предупреждения, сформированные ContextBuilder.
       @warnings = context['__warnings'] || @warnings
@@ -81,6 +87,9 @@ module DocumentGenerator
           shared_strings
         )
       end
+
+      # Сообщаем о завершении формирования выходного документа.
+      @progress_callback.call(:render_complete, 1.0) if @progress_callback
 
       output_path
     rescue StandardError => e
@@ -1172,4 +1181,4 @@ module DocumentGenerator
 
   end
 end
-# v2610081336
+# v2610131550

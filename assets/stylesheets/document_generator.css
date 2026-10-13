@@ -82,3 +82,71 @@
     text-align: left;
   }
 }
+
+/* Полноэкранный слой блокирует взаимодействие с формой на время генерации. */
+.dg-progress-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* Панель прогресса располагается поверх модального окна Redmine. */
+.dg-progress-panel {
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid #c7c7c7;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.dg-progress-title {
+  margin: 0 0 20px;
+  font-size: 1.3em;
+}
+
+.dg-progress-stage {
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.dg-progress-track {
+  height: 18px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #e5e5e5;
+}
+
+.dg-progress-bar {
+  width: 0;
+  height: 100%;
+  background: #2675c9;
+  transition: width 0.35s ease;
+}
+
+.dg-progress-percent {
+  margin-top: 8px;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dg-progress-message {
+  margin: 18px 0 0;
+  color: #666;
+}
+
+@media screen and (max-width: 600px) {
+  .dg-progress-panel {
+    padding: 20px;
+  }
+}
+
+/* v2610131611 */

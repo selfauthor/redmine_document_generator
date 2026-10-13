@@ -79,3 +79,13 @@ en:
     # Helper strings
     relation_type: "Relation Type"
     watcher_name: "Name"
+
+    progress_title: "Generating document"
+    progress_preparing: "Preparing issue data"
+    progress_rendering: "Building output file"
+    progress_wait: "Processing. Please do not close this page."
+    progress_stage_preparing: "Stage 1 of 2"
+    progress_stage_rendering: "Stage 2 of 2"
+    progress_complete: "Generation completed"
+    error_invalid_progress_id: "Could not initialize operation tracking. Refresh the page and try again."
+    error_progress_request_failed: "Could not retrieve operation status or complete the export. Please try again."

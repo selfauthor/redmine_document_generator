@@ -63,85 +63,186 @@ class DocumentGeneratorController < ApplicationController
     end
   end
 
-
   # POST /projects/:project_id/document_generator/export
   # Генерирует документ или ZIP-архив и возвращает ссылку на защищённое скачивание.
   # @return [void]
   def export
-    # Сбрасываем кэш разрешения полей перед каждой генерацией,
-    # чтобы изменения пользовательских полей Redmine сразу учитывались.
+    # Сбрасываем кэш разрешения полей перед каждой генерацией.
     DocumentGenerator::FieldResolver.reset_cache!
 
     @template_file = params[:template_file]
     @export_mode = params[:export_mode]
     @file_name = params[:file_name].to_s.strip
     @error_behavior = params[:error_behavior]
-
-    # Режим Redmine-разметки разрешён только для Word.
-    # Для Excel всегда используется обычная текстовая подстановка.
-    @description_format =
-      params[:description_format].to_s == 'redmine' ? 'redmine' : 'raw'
-
     @render_warnings = []
+
+    temp_template_dir = nil
+    export_dir = nil
+    progress_tracker = nil
+    @progress_tracker = nil
+    heartbeat_running = false
+    heartbeat_thread = nil
 
     # Проверяем имя файла до запуска генерации.
     if @file_name.blank? || @file_name =~ %r{[\\/:*?"<>|]}
-      return render_export_error(I18n.t('document_generator.error_invalid_filename'))
+      return render_export_error(
+        I18n.t('document_generator.error_invalid_filename')
+      )
     end
 
     # Проверяем наличие шаблона и допустимость его расширения.
-    unless @template_file && valid_template_extension?(@template_file.original_filename)
-      return render_export_error(I18n.t('document_generator.error_invalid_format'))
+    unless @template_file &&
+           valid_template_extension?(@template_file.original_filename)
+      return render_export_error(
+        I18n.t('document_generator.error_invalid_format')
+      )
     end
 
-    # Режим Redmine-разметки разрешён только для Word.
+    # Принимаем только корректный UUID операции, переданный браузером.
+    export_uuid = params[:progress_uuid].to_s
+
+    unless export_uuid.match?(
+      /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+    )
+      return render_export_error(
+        I18n.t('document_generator.error_invalid_progress_id')
+      )
+    end
+
     # Для Excel всегда используется обычная текстовая подстановка.
-    if File.extname(@template_file.original_filename).downcase == '.xlsx'
-      @description_format = 'raw'
-    else
-      @description_format =
-        params[:description_format].to_s == 'redmine' ? 'redmine' : 'raw'
+    ext = File.extname(@template_file.original_filename).downcase
+    @description_format =
+      ext == '.docx' && params[:description_format].to_s == 'redmine' ?
+        'redmine' : 'raw'
+
+    # Файл состояния хранится отдельно от каталога результата.
+    progress_tracker = DocumentGenerator::ProgressTracker.new(
+      progress_state_path(export_uuid),
+      project_id: @project.id,
+      user_id: User.current.id
+    )
+    @progress_tracker = progress_tracker
+
+    # Heartbeat обновляет состояние во время длительных операций,
+    # в которых нет доступных контрольных точек.
+    heartbeat_running = true
+
+    heartbeat_thread = Thread.new do
+      while heartbeat_running
+        sleep 1
+        progress_tracker.tick if heartbeat_running
+      end
+    rescue StandardError => e
+      Rails.logger.warn(
+        "[DocumentGenerator] Progress heartbeat stopped: #{e.message}"
+      )
     end
-
-    # Получаем задачи, выбранные текущими параметрами фильтра.
-    data_provider = DocumentGenerator::DataProvider.new(@project, User.current, params)
-    @issues = data_provider.fetch_issues
-
-    if @issues.empty?
-      return render_export_error(I18n.t('document_generator.error_no_records'))
-    end
-
-    # Создаём уникальную папку для промежуточных и итоговых файлов текущей операции.
-    export_uuid = SecureRandom.uuid
-    export_dir = File.join(export_root_dir, export_uuid)
-    FileUtils.mkdir_p(export_dir)
 
     begin
-      # Сохраняем загруженный шаблон внутри блока обработки ошибок,
-      # чтобы ошибка превышения допустимого размера корректно возвращалась пользователю.
+      # Первый этап: получение выборки задач.
+      progress_tracker.set_phase(
+        stage: 'preparing',
+        min: 0,
+        max: @export_mode == 'single' ? 5 : 10,
+        message: I18n.t('document_generator.progress_wait')
+      )
+
+      data_provider = DocumentGenerator::DataProvider.new(
+        @project,
+        User.current,
+        params
+      )
+      @issues = data_provider.fetch_issues
+
+      if @issues.empty?
+        raise DocumentGenerator::RenderError,
+              I18n.t('document_generator.error_no_records')
+      end
+
+      # Создаём каталог промежуточных и итоговых файлов операции.
+      export_dir = File.join(export_root_dir, export_uuid)
+      FileUtils.mkdir_p(export_dir)
+
+      # Сохраняем шаблон и разбираем его конфигурацию.
       template_result = save_uploaded_template(@template_file)
       temp_template_path = template_result[:path]
       temp_template_dir = template_result[:dir]
-      
+
       parser = DocumentGenerator::TemplateParser.new(temp_template_path)
       config = parser.parse
 
       if @export_mode == 'single'
-        # Генерируем отдельные документы и помещаем их в ZIP с исходными именами.
+        # При отдельных документах подготовка контекста и рендеринг
+        # чередуются для каждой задачи.
+        progress_tracker.set_phase(
+          stage: 'preparing',
+          min: 5,
+          max: 95,
+          message: I18n.t('document_generator.progress_wait'),
+          percent: 5
+        )
+
         output_path = File.join(export_dir, "#{export_uuid}.zip")
-        generate_single_mode_archive(temp_template_path, config, output_path, export_dir)
+
+        generate_single_mode_archive(
+          temp_template_path,
+          config,
+          output_path,
+          export_dir
+        )
+
         download_filename = "#{@file_name}.zip"
         content_type = 'application/zip'
       else
-        # Генерируем единый документ в папке текущей операции.
+        # Для единого документа подготовка контекста занимает
+        # диапазон 10–50%, а формирование файла — диапазон 50–95%.
+        progress_tracker.set_phase(
+          stage: 'preparing',
+          min: 10,
+          max: 90,
+          message: I18n.t('document_generator.progress_wait'),
+          percent: 10
+        )
+
+        @current_progress_callback = lambda do |event, fraction|
+          case event
+          when :context_progress
+            progress_tracker.update_fraction(fraction)
+
+          when :context_complete
+            progress_tracker.set_phase(
+              stage: 'rendering',
+              min: 90,
+              max: 95,
+              message: I18n.t('document_generator.progress_wait'),
+              percent: 50
+            )
+
+          when :render_complete
+            progress_tracker.set_phase(
+              stage: 'rendering',
+              min: 90,
+              max: 95,
+              message: I18n.t('document_generator.progress_wait'),
+              percent: 95
+            )
+          end
+        end
+
         ext = File.extname(temp_template_path).downcase
         output_path = File.join(export_dir, "#{export_uuid}#{ext}")
-        generate_combined_document(temp_template_path, config, output_path)
+
+        generate_combined_document(
+          temp_template_path,
+          config,
+          output_path
+        )
+
         download_filename = "#{@file_name}#{ext}"
         content_type = mime_type_for(ext)
       end
 
-      # Сохраняем метаданные, необходимые для проверки доступа и выдачи файла.
+      # Сохраняем метаданные для проверки доступа и выдачи файла.
       metadata = {
         uuid: export_uuid,
         project_id: @project.id,
@@ -165,33 +266,87 @@ class DocumentGeneratorController < ApplicationController
 
       touch_working_directory(export_dir)
 
-      # Возвращаем браузеру адрес скачивания и предупреждения генератора.
+      # Сначала фиксируем успешное завершение, затем возвращаем результат браузеру.
+      progress_tracker.finish(
+        status: 'success',
+        message: I18n.t('document_generator.progress_complete')
+      )
+
       render json: {
         type: 'success',
         download_url: download_url,
         filename: download_filename,
         warnings: @render_warnings
       }, status: :ok
-    rescue DocumentGenerator::TemplateError, DocumentGenerator::RenderError => e
-      # Удаляем незавершённый результат при штатной ошибке генерации.
-      FileUtils.rm_rf(export_dir) if export_dir && File.directory?(export_dir)
-      render_export_error(e.message)
-    rescue StandardError => e
-      # Записываем техническую информацию в журнал, а пользователю возвращаем локализованное сообщение.
-      Rails.logger.error "[DocumentGenerator] Export failed: #{e.message}\n#{e.backtrace&.join("\n")}"
+
+    rescue DocumentGenerator::TemplateError,
+           DocumentGenerator::RenderError => e
+      # Удаляем незавершённый результат, сохраняя состояние ошибки для браузера.
       FileUtils.rm_rf(export_dir) if export_dir && File.directory?(export_dir)
 
-      short_msg = e.message.to_s.truncate(200)
-      render_export_error(
-        I18n.t('document_generator.error_render_failed', message: short_msg)
+      progress_tracker&.finish(status: 'error', message: e.message)
+      render_export_error(e.message)
+
+    rescue StandardError => e
+      # Технические подробности сохраняем в журнале Redmine.
+      Rails.logger.error(
+        "[DocumentGenerator] Export failed: #{e.message}\n#{e.backtrace&.join("\n")}"
       )
+
+      FileUtils.rm_rf(export_dir) if export_dir && File.directory?(export_dir)
+
+      error_message = I18n.t(
+        'document_generator.error_render_failed',
+        message: e.message.to_s.truncate(200)
+      )
+
+      progress_tracker&.finish(
+        status: 'error',
+        message: error_message
+      )
+
+      render_export_error(error_message)
+
     ensure
-      # Удаляем временный каталог шаблона целиком независимо от результата генерации.
-      # Это предотвращает накопление пустых директорий в системном /tmp.
+      # Останавливаем heartbeat при любом результате операции.
+      heartbeat_running = false
+      heartbeat_thread&.join(1.5)
+
+      # Удаляем временный каталог шаблона независимо от результата.
       if temp_template_dir && File.directory?(temp_template_dir)
         FileUtils.rm_rf(temp_template_dir)
       end
     end
+  end
+
+  # GET /projects/:project_id/document_generator/progress/:uuid
+  # Возвращает состояние операции только запустившему её пользователю.
+  # @return [void]
+  def progress
+    # Проверяем UUID до формирования пути, исключая произвольные пути к файлам.
+    uuid = params[:uuid].to_s
+
+    unless uuid.match?(
+      /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+    )
+      return render_404
+    end
+
+    state_path = progress_state_path(uuid)
+    return render_404 unless File.file?(state_path)
+
+    # Разделяемая блокировка ожидает окончания записи состояния.
+    state = DocumentGenerator::ProgressTracker.read(state_path)
+
+    return render_404 unless state['uuid'] == uuid
+    return render_404 unless state['project_id'].to_i == @project.id
+    return render_404 unless state['user_id'].to_i == User.current.id
+
+    render json: state, status: :ok
+
+  rescue JSON::ParserError, Errno::ENOENT
+    # При неполном состоянии браузер повторит запрос через секунду.
+    render json: { status: 'pending' }, status: :accepted
   end
 
   # GET /projects/:project_id/document_generator/download/:uuid
@@ -379,8 +534,52 @@ class DocumentGeneratorController < ApplicationController
     intermediate_paths = []
 
     Zip::File.open(archive_path, Zip::File::CREATE) do |zipfile|
-      @issues.each do |issue|
+      @issues.each_with_index do |issue, issue_index|
+        
+        # Выделяем для каждого документа отдельный диапазон прогресса.
+        # Первая половина диапазона отведена подготовке контекста, вторая — рендерингу.
+        segment_min = 5 + (90.0 * issue_index / @issues.length)
+        segment_mid = segment_min + (45.0 / @issues.length)
+        segment_max = segment_min + (90.0 / @issues.length)
+
+        # Начинаем диапазон подготовки контекста текущего документа.
+        @progress_tracker&.set_phase(
+          stage: 'preparing',
+          min: segment_min.floor,
+          max: segment_mid.floor,
+          message: I18n.t('document_generator.progress_wait'),
+          force: false
+        )
+
+        @current_progress_callback = lambda do |event, fraction|
+          case event
+          when :context_progress
+            @progress_tracker&.update_fraction(fraction)
+
+          when :context_complete
+            @progress_tracker&.set_phase(
+              stage: 'rendering',
+              min: segment_mid.floor,
+              max: segment_max.floor,
+              message: I18n.t('document_generator.progress_wait'),
+              percent: segment_mid.floor,
+              force: false
+            )
+
+          when :render_complete
+            @progress_tracker&.set_phase(
+              stage: 'rendering',
+              min: segment_mid.floor,
+              max: segment_max.floor,
+              message: I18n.t('document_generator.progress_wait'),
+              percent: segment_max.floor,
+              force: false
+            )
+          end
+        end
+
         renderer = create_renderer(template_path, [issue], config)
+
         result = renderer.render
 
         # Накапливаем предупреждения по каждой задаче, вошедшей в архив.
@@ -439,14 +638,16 @@ class DocumentGeneratorController < ApplicationController
         issues,
         config,
         @error_behavior,
-        @description_format
+        @description_format,
+        @current_progress_callback
       )
     else
       renderer_class.new(
         template_path,
         issues,
         config,
-        @error_behavior
+        @error_behavior,
+        @current_progress_callback
       )
     end
   end
@@ -465,6 +666,13 @@ class DocumentGeneratorController < ApplicationController
   def valid_template_extension?(filename)
     ext = File.extname(filename).downcase
     %w[.docx .xlsx].include?(ext)
+  end
+
+  # Возвращает путь к файлу состояния конкретной операции.
+  # @param uuid [String] UUID операции генерации.
+  # @return [String] Абсолютный путь к JSON-файлу состояния.
+  def progress_state_path(uuid)
+    File.join(export_root_dir, ".progress-#{uuid}.json")
   end
 
   # Возвращает корневую папку, в которой хранятся результаты генерации.
@@ -576,6 +784,22 @@ class DocumentGeneratorController < ApplicationController
     # Вычисляем предельное время: каталоги старше этой отметки подлежат удалению.
     expiration_time = Time.current - retention_hours.hours
 
+    # Удаляем устаревшие файлы состояния по тому же сроку хранения, что и результаты.
+    Dir.children(storage_root).each do |entry|
+      state_path = storage_root.join(entry)
+
+      next unless entry.match?(/\A\.progress-[0-9a-f-]+\.json\z/i)
+      next unless File.file?(state_path) && !File.symlink?(state_path)
+      next unless File.mtime(state_path) < expiration_time
+
+      FileUtils.rm_f(state_path)
+    rescue StandardError => e
+      Rails.logger.warn(
+        "[DocumentGenerator] Failed to remove expired progress state " \
+        "#{state_path}: #{e.message}"
+      )
+    end
+
     # Обрабатываем только непосредственные подкаталоги хранилища.
     Dir.children(storage_root).each do |entry|
       directory_path = storage_root.join(entry)
@@ -607,4 +831,4 @@ class DocumentGeneratorController < ApplicationController
   end
 
 end
-# v2610131349
+# v2610131624

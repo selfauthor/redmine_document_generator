@@ -1,6 +1,18 @@
 <h3 class="title"><%= l('document_generator.dialog_title') %></h3>
 
-<%= form_tag document_generator_export_path(@project, request.query_parameters), method: :post, id: 'document-generator-form', multipart: true do %>
+<%= form_tag document_generator_export_path(@project, request.query_parameters),
+             method: :post,
+             id: 'document-generator-form',
+             multipart: true,
+             data: {
+               progress_title: l('document_generator.progress_title'),
+               progress_preparing: l('document_generator.progress_preparing'),
+               progress_rendering: l('document_generator.progress_rendering'),
+               progress_wait: l('document_generator.progress_wait'),
+               progress_stage_preparing: l('document_generator.progress_stage_preparing'),
+               progress_stage_rendering: l('document_generator.progress_stage_rendering'),
+               progress_error: l('document_generator.error_progress_request_failed')
+             } do %>
 
   <fieldset class="box">
     <legend><%= l('document_generator.export_parameters') %></legend>

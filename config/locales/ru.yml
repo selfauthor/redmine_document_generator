@@ -79,3 +79,13 @@ ru:
     # Вспомогательные строки
     relation_type: "Тип связи"
     watcher_name: "Имя"
+
+    progress_title: "Формирование документа"
+    progress_preparing: "Подготовка данных задач"
+    progress_rendering: "Формирование выходного файла"
+    progress_wait: "Идёт обработка. Не закрывайте страницу."
+    progress_stage_preparing: "Этап 1 из 2"
+    progress_stage_rendering: "Этап 2 из 2"
+    progress_complete: "Генерация завершена"
+    error_invalid_progress_id: "Не удалось запустить отслеживание операции. Обновите страницу и повторите попытку."
+    error_progress_request_failed: "Не удалось получить состояние операции или завершить выгрузку. Повторите попытку."
