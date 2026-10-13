@@ -2055,10 +2055,11 @@ module DocumentGenerator
             inner_template = Regexp.last_match(1)
 
             collection_data.map do |item|
-              # Формируем контекст текущего элемента коллекции.
-              item_context = context.merge(
-                config[:item_prefix] => item
-              )
+            # Формируем контекст элемента коллекции с ключом в нижнем регистре,
+            # чтобы он соответствовал механизму поиска полей.
+            item_context = context.merge(
+              config[:item_prefix].to_s.downcase => item
+            )
 
               begin
                 # Подставляем поля текущего элемента.
@@ -2182,9 +2183,10 @@ module DocumentGenerator
         expanded_blocks = []
 
         collection_data.each do |item|
-          # Формируем контекст текущего элемента коллекции.
+          # Формируем контекст элемента коллекции с ключом в нижнем регистре,
+          # чтобы он соответствовал механизму поиска полей.
           item_context = context.merge(
-            config[:item_prefix] => item
+            config[:item_prefix].to_s.downcase => item
           )
 
           item_blocks = []
@@ -2261,4 +2263,4 @@ module DocumentGenerator
 
   end
 end
-# v2610091115
+# v2610121509

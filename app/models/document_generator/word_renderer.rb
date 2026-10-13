@@ -92,8 +92,12 @@ module DocumentGenerator
         ns
       )
       records = context['records'] || []
-      # Если есть блок BEGIN_ROW/END_ROW и есть записи - обрабатываем циклы
-      if @parser_config[:blocks][:row] && records.present?
+
+      # Обрабатываем циклы только в основном документе Word.
+      # Заголовки и колонтитулы могут содержать поля, но не циклы задач.
+      if entry_name == 'word/document.xml' &&
+         @parser_config[:blocks][:row] &&
+         records.present?
         process_row_blocks(doc, context, records, ns)
       end
       # Контекст для рендеринга (общий + первая запись)
@@ -770,4 +774,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610121125
+# v2610131122

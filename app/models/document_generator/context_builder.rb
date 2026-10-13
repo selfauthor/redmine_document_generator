@@ -263,20 +263,23 @@ module DocumentGenerator
       }
     end
 
-    # Формирует контекст одной основной задачи.
+    # Формирует полный набор полей задачи, общий для всех типов контекста.
     #
-    # @param issue [Issue] Основная задача Redmine.
-    # @return [Hash] Контекст задачи со стандартными, пользовательскими полями
-    #   и вложенными коллекциями.
-    def build_issue_hash(issue)
-      hash = {}
+    # Метод используется для основных задач, подзадач, родительских
+    # и связанных задач. Поэтому стандартные и пользовательские поля
+    # доступны одинаково независимо от того, где задача используется.
+    #
+    # @param issue [Issue] Задача Redmine, поля которой нужно подготовить.
+    # @return [Hash] Хэш полей задачи с ключами в нижнем регистре.
+    def build_issue_fields_hash(issue)
+      hash = {
+        '__issue' => issue,
+        '__warnings' => @warnings
+      }
 
-      # Сохраняем объект задачи для формирования диагностических сообщений.
-      hash['__issue'] = issue
-
-      # Все записи используют общий массив предупреждений текущей выгрузки.
-      hash['__warnings'] = @warnings
-
+      # Единое описание поддерживаемых стандартных полей Redmine.
+      # При добавлении стандартного поля его следует согласованно добавить
+      # также в FieldResolver, чтобы поле можно было использовать в группировках.
       standard_fields_map = {
         'id' => issue.id,
         'subject' => issue.subject,
@@ -300,40 +303,24 @@ module DocumentGenerator
         'parent_id' => issue.parent_id
       }
 
-      # Сначала добавляем стандартные поля.
-      # Это обеспечивает их приоритет над пользовательскими полями
-      # с совпадающим отображаемым названием.
+      # Сначала записываем стандартные поля, используя их локализованные
+      # названия. Все ключи приводятся к нижнему регистру.
       standard_fields_map.each do |field_key, value|
         localized_name = I18n.t(
           "field_#{field_key}",
           default: field_key.humanize
         )
 
-        # Все имена полей в контексте хранятся в нижнем регистре.
-        # Это делает стандартные поля регистронезависимыми при обращении из шаблона.
         hash[localized_name.to_s.downcase] = self.class.format_value(value)
       end
 
-      # Формируем контекст родительской задачи.
-      if issue.parent
-        # Имена полей родительской задачи также хранятся в нижнем регистре,
-        # чтобы обращения Parent.ID, Parent.Id, Parent.id и Parent.iD
-        # обрабатывались одинаково.
-        hash['parent'] = {
-          I18n.t('field_subject', default: 'Subject').to_s.downcase => issue.parent.subject,
-          I18n.t('field_status', default: 'Status').to_s.downcase => issue.parent.status&.name,
-          I18n.t('field_assigned_to', default: 'Assigned to').to_s.downcase => issue.parent.assigned_to&.name,
-          'id' => issue.parent.id
-        }
-      end
-
-      # Добавляем пользовательские поля только при отсутствии стандартного
-      # поля с таким же отображаемым названием.
+      # Добавляем пользовательские поля задачи.
+      # При совпадении названия со стандартным полем приоритет остаётся
+      # за стандартным полем, как и в остальной системе шаблонов.
       issue.custom_field_values.each do |cfv|
-        field_name = cfv.custom_field.name.to_s.downcase
+        field_name = cfv.custom_field&.name.to_s.downcase
 
-        # Стандартное поле с таким отображаемым именем имеет приоритет
-        # над пользовательским полем.
+        next if field_name.empty?
         next if hash.key?(field_name)
 
         value = cfv.value.is_a?(Array) ? cfv.value.join(', ') : cfv.value
@@ -341,39 +328,45 @@ module DocumentGenerator
         hash[field_name] = self.class.format_value(value)
       end
 
-      # Формируем контекст подзадач, используя уже загруженную ассоциацию children,
-      # что предотвращает выполнение дополнительных N+1 запросов к базе данных.
-      hash['subtasks'] = issue.children.includes(
-                           :status,
-                           :assigned_to,
-                           custom_values: :custom_field
-                         ).map do |child|
-        subtask_hash = {
-          '__issue' => child,
-          'id' => child.id,
-          I18n.t('field_subject', default: 'Subject').to_s.downcase => child.subject,
-          I18n.t('field_status', default: 'Status').to_s.downcase => child.status&.name
-        }
+      hash
+    end
 
-        # Пользовательские поля подзадачи также не должны перезаписывать
-        # стандартные поля с тем же названием.
-        child.custom_field_values.each do |cfv|
-          field_name = cfv.custom_field.name.to_s.downcase
+    # Формирует полный контекст основной задачи и её вложенных коллекций.
+    #
+    # @param issue [Issue] Основная задача Redmine.
+    # @return [Hash] Контекст задачи со стандартными, пользовательскими
+    #   полями и коллекциями подзадач, связанных задач и наблюдателей.
+    def build_issue_hash(issue)
+      # Основные поля формируются тем же методом, который используется
+      # для подзадач, родительских и связанных задач.
+      hash = build_issue_fields_hash(issue)
 
-          # Стандартное поле подзадачи имеет приоритет
-          # над пользовательским полем с таким же названием.
-          next if subtask_hash.key?(field_name)
+      # Добавляем полный набор полей родительской задачи.
+      # Вложенный объект содержит поля родителя, но не строит рекурсивную
+      # цепочку всех предков.
+      if issue.parent
+        hash['parent'] = build_issue_fields_hash(issue.parent)
+      end
 
-          value = cfv.value.is_a?(Array) ? cfv.value.join(', ') : cfv.value
+      # Формируем контекст подзадач через общий метод полей.
+      # Метод children в используемой версии Redmine может возвращать
+      # обычный массив, поэтому не вызываем у него ActiveRecord-метод includes.
+      hash['subtasks'] = Array(issue.children).map do |child|
+        subtask_hash = build_issue_fields_hash(child)
 
-          subtask_hash[field_name] = self.class.format_value(value)
+        # Родитель подзадачи также доступен через Subtask.Parent.*.
+        # Добавляем поля родителя без рекурсивного построения его коллекций.
+        if child.parent
+          subtask_hash['parent'] = build_issue_fields_hash(child.parent)
         end
 
         subtask_hash
       end
 
       # Формируем контекст связанных задач.
-      hash['relations'] = issue.relations.map do |relation|
+      # Коллекция relations может быть обычным массивом, поэтому
+      # не используем ActiveRecord-метод includes.
+      hash['relations'] = Array(issue.relations).map do |relation|
         target =
           if relation.issue_to_id == issue.id
             relation.issue_from
@@ -383,30 +376,29 @@ module DocumentGenerator
 
         next nil unless target
 
-      {
-        I18n.t(
+        relation_hash = build_issue_fields_hash(target)
+
+        # Тип связи относится к записи Relation и имеет приоритет
+        # над пользовательским полем с таким же отображаемым названием.
+        relation_type_key = I18n.t(
           'document_generator.relation_type',
           default: 'Relation Type'
-        ).to_s.downcase => relation.relation_type_for(issue),
-        I18n.t(
-          'field_subject',
-          default: 'Subject'
-        ).to_s.downcase => target.subject,
-        I18n.t(
-          'field_status',
-          default: 'Status'
-        ).to_s.downcase => target.status&.name
-      }
+        ).to_s.downcase
+
+        relation_hash[relation_type_key] = relation.relation_type_for(issue)
+
+        relation_hash
       end.compact
 
       # Формируем контекст наблюдателей.
+      # Наблюдатели остаются объектами пользователей, а не задачами.
       hash['watchers'] = issue.watchers.map do |watcher|
-      {
-        I18n.t(
-          'document_generator.watcher_name',
-          default: 'Name'
-        ).to_s.downcase => watcher.user&.name
-      }
+        {
+          I18n.t(
+            'document_generator.watcher_name',
+            default: 'Name'
+          ).to_s.downcase => watcher.user&.name
+        }
       end
 
       hash
@@ -567,4 +559,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610091004
+# v2610121635
