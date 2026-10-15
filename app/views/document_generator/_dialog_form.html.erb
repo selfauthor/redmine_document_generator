@@ -1,6 +1,10 @@
 <h3 class="title"><%= l('document_generator.dialog_title') %></h3>
+<%# Показываем ошибку, если JSON-снимок отсутствует или недействителен. %>
+<% if @snapshot_error.present? %>
+  <p class="error" role="alert"><%= @snapshot_error %></p>
+<% end %>
 
-<%= form_tag document_generator_export_path(@project, request.query_parameters),
+<%= form_tag document_generator_export_path(@project),
              method: :post,
              id: 'document-generator-form',
              multipart: true,
@@ -178,28 +182,8 @@
     </span>
   </p>
 
-  <!-- Скрытые поля для передачи параметров фильтра -->
-  <% if @filter_params.present? %>
-    <% @filter_params.each do |key, value| %>
-      <% if value.is_a?(Hash) %>
-        <% value.each do |k, v| %>
-          <% if v.is_a?(Array) %>
-            <% v.each do |val| %>
-              <%= hidden_field_tag "#{key}[#{k}][]", val %>
-            <% end %>
-          <% else %>
-            <%= hidden_field_tag "#{key}[#{k}]", v %>
-          <% end %>
-        <% end %>
-      <% elsif value.is_a?(Array) %>
-        <% value.each do |v| %>
-          <%= hidden_field_tag "#{key}[]", v %>
-        <% end %>
-      <% else %>
-        <%= hidden_field_tag key, value %>
-      <% end %>
-    <% end %>
-  <% end %>
+  <%# Передаём UUID снимка, созданного при отображении списка задач. %>
+  <%= hidden_field_tag 'issue_list_token', @issue_list_token %>
 
 <% end %>
-<!-- v2610081632 -->
+<!-- v2610141427 -->

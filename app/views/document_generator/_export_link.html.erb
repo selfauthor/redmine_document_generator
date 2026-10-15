@@ -11,7 +11,10 @@
     <%# Скрытый контейнер — JS переместит ссылку в блок other-formats %>
     <span id="document-generator-export-link" style="display:none;">
       <%= link_to sprite_icon('file', l(:label_document_generator)),
-                  document_generator_dialog_path(@project, request.query_parameters),
+                  document_generator_dialog_path(
+                    @project,
+                    issue_list_token: issue_list_token
+                  ),
                   remote: true,
                   data: { turbo: false },
                   class: 'icon icon-file' %>

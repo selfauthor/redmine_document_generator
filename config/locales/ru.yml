@@ -40,6 +40,7 @@ ru:
     description_format_word_only: "Доступно только для выгрузки в Word"
 
     # Сообщения об ошибках
+    error_issue_list_expired: "Снимок списка задач не найден или срок его хранения истёк. Обновите список задач и повторите выгрузку."
     error_export_not_found: "Запрошенный результат выгрузки не найден или срок его хранения истёк."
     error_missing_end_row: "Не найден закрывающий маркер <%END_ROW%> для блока <%BEGIN_ROW%>"
     error_row_block_mismatch: "Некорректная структура блока <%BEGIN_ROW%> / <%END_ROW%>"

@@ -10,58 +10,43 @@ class DocumentGeneratorController < ApplicationController
   # Проверяем доступность библиотек только перед запуском генерации.
   before_action :check_gems_loaded, only: [:export]
 
+
   # GET /projects/:project_id/document_generator/dialog
-  # Подготавливает параметры фильтра и отображает диалог генерации документов.
-  # Перед подготовкой диалога удаляет папки с результатами, срок хранения которых истёк.
+  # Проверяет JSON-снимок и подготавливает данные для диалога выгрузки.
   # @return [void]
   def dialog
-    # Удаляем каталоги с результатами, срок хранения которых истёк.
+    # Удаляем просроченные результаты и снимки по существующему сроку хранения.
     cleanup_expired_directories
+    DocumentGenerator::IssueListSnapshot.cleanup_expired!
 
-    # Копируем логику из IssuesController#index
-    use_session = true
+    # Сохраняем UUID снимка для передачи в форму экспорта.
+    @issue_list_token = params[:issue_list_token].to_s
 
-    # Копируем retrieve_default_query
-    unless params[:query_id].present? || api_request? || params[:set_filter]
-      if params[:without_default].present?
-        params[:set_filter] = 1
-      elsif !params[:set_filter] && use_session && session[:issue_query]
-        query_id, project_id = session[:issue_query].values_at(:id, :project_id)
-        unless query_id && project_id == @project&.id && IssueQuery.exists?(id: query_id)
-          # continue
-        end
-      end
+    # Читаем снимок при открытии окна, а не во время запуска экспорта.
+    issue_snapshot = DocumentGenerator::IssueListSnapshot.read(
+      uuid: @issue_list_token,
+      project_id: @project.id,
+      user_id: User.current.id
+    )
 
-      if default_query = IssueQuery.default(project: @project)
-        params[:query_id] = default_query.id
-      end
+    if issue_snapshot
+      # Используем число ID из снимка, а не повторно вычисленный счётчик IssueQuery.
+      @record_count = issue_snapshot['issue_ids'].length
+      @snapshot_error = nil
+    else
+      # Показываем ошибку сразу, если снимок отсутствует или недействителен.
+      @record_count = 0
+      @snapshot_error = I18n.t('document_generator.error_issue_list_expired')
     end
-
-    # Используем retrieve_query из QueriesHelper
-    retrieve_query(IssueQuery, use_session)
-
-    @record_count = @query.issue_count
 
     # Получаем доступные результаты предыдущих выгрузок текущего проекта.
     @available_files = available_export_files
-
-    # Сохраняем параметры фильтра для передачи в export
-    @filter_params = {
-      'f' => @query.filters.keys,
-      'op' => @query.filters.transform_values { |v| v[:operator] },
-      'v' => @query.filters.transform_values { |v| v[:values] },
-      'sort' => @query.sort_criteria.to_param,
-      'group_by' => @query.group_by,
-      'c' => @query.column_names
-    }.compact
-
-    # Добавляем query_id, если есть
-    @filter_params['query_id'] = params[:query_id] if params[:query_id].present?
 
     respond_to do |format|
       format.js
     end
   end
+
 
   # POST /projects/:project_id/document_generator/export
   # Генерирует документ или ZIP-архив и возвращает ссылку на защищённое скачивание.
@@ -147,13 +132,40 @@ class DocumentGeneratorController < ApplicationController
         message: I18n.t('document_generator.progress_wait')
       )
 
-      data_provider = DocumentGenerator::DataProvider.new(
-        @project,
-        User.current,
-        params
+      # Повторно читаем JSON-снимок непосредственно перед подготовкой документа.
+      issue_snapshot = DocumentGenerator::IssueListSnapshot.read(
+        uuid: params[:issue_list_token],
+        project_id: @project.id,
+        user_id: User.current.id
       )
-      @issues = data_provider.fetch_issues
 
+      # Если снимок удалён, повреждён или просрочен, прекращаем экспорт.
+      unless issue_snapshot
+        raise DocumentGenerator::RenderError,
+              I18n.t('document_generator.error_issue_list_expired')
+      end
+
+      # Загружаем существующие и доступные пользователю задачи
+      # в порядке, сохранённом в JSON-снимке.
+      @issues = fetch_issues_from_snapshot(issue_snapshot['issue_ids'])
+
+      # Прерываем генерацию, если доступных задач не осталось.
+      if @issues.empty?
+        raise DocumentGenerator::RenderError,
+              I18n.t('document_generator.error_no_records')
+      end
+
+      # Не пересчитываем фильтры, если снимок отсутствует или недействителен.
+      unless issue_snapshot
+        raise DocumentGenerator::RenderError,
+              I18n.t('document_generator.error_issue_list_expired')
+      end
+
+      # Загружаем актуальные задачи в порядке ID, сохранённом в снимке.
+      # Удалённые и ставшие недоступными пользователю задачи будут пропущены.
+      @issues = fetch_issues_from_snapshot(issue_snapshot['issue_ids'])
+
+      # Прерываем генерацию, если доступных задач не осталось.
       if @issues.empty?
         raise DocumentGenerator::RenderError,
               I18n.t('document_generator.error_no_records')
@@ -396,6 +408,47 @@ class DocumentGeneratorController < ApplicationController
   end
 
   private
+
+  # Загружает доступные пользователю задачи в порядке, сохранённом в снимке.
+  #
+  # @param issue_ids [Array<Integer>] Упорядоченные ID задач из JSON-снимка.
+  # @return [Array<Issue>] Доступные задачи с загруженными связанными объектами.
+  def fetch_issues_from_snapshot(issue_ids)
+    # Сохраняем исходный порядок и исключаем случайные дубликаты.
+    ordered_ids = issue_ids.map(&:to_i).uniq
+    return [] if ordered_ids.empty?
+
+    # Загружаем только задачи, доступные текущему пользователю.
+    # Связи нужны для последующей подготовки контекста генератора.
+    issues = Issue.visible(User.current)
+                  .where(id: ordered_ids)
+                  .includes(
+                    :status,
+                    :priority,
+                    :author,
+                    :assigned_to,
+                    :project,
+                    :tracker,
+                    :category,
+                    :fixed_version,
+                    :parent,
+                    custom_values: :custom_field,
+                    watchers: :user
+                  )
+                  .to_a
+
+    # Восстанавливаем порядок снимка, поскольку SQL-запрос where(id: ...)
+    # сам по себе не гарантирует порядок элементов в результате.
+    issues_by_id = issues.index_by(&:id)
+    ordered_issues = ordered_ids.filter_map do |issue_id|
+      issues_by_id[issue_id]
+    end
+
+    # Загружаем связи задач, используемые стандартными механизмами Redmine.
+    Issue.load_relations(ordered_issues) if ordered_issues.any?
+
+    ordered_issues
+  end
 
   # Возвращает ошибку экспорта в JSON-формате для единого JavaScript-обработчика.
   # @param message [String] Текст ошибки, который нужно показать пользователю.
@@ -800,8 +853,13 @@ class DocumentGeneratorController < ApplicationController
       )
     end
 
-    # Обрабатываем только непосредственные подкаталоги хранилища.
+    # Обрабатываем только каталоги результатов с именами в формате UUID.
+    # Каталог issue_lists очищается отдельным механизмом JSON-снимков.
     Dir.children(storage_root).each do |entry|
+      next unless entry.match?(
+        /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
+      )
+
       directory_path = storage_root.join(entry)
 
       # Не удаляем файлы и символические ссылки.
@@ -831,4 +889,4 @@ class DocumentGeneratorController < ApplicationController
   end
 
 end
-# v2610131624
+# v2610141450

@@ -40,6 +40,7 @@ en:
     description_format_word_only: "Available only for Word export"
 
     # Error messages
+    error_issue_list_expired: "The issue-list snapshot was not found or has expired. Refresh the issue list and try exporting again."
     error_export_not_found: "The requested export was not found or has expired."
     error_missing_end_row: "Missing closing marker <%END_ROW%> for <%BEGIN_ROW%> block"
     error_row_block_mismatch: "Invalid <%BEGIN_ROW%> / <%END_ROW%> block structure"

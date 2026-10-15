@@ -34,6 +34,8 @@ rescue LoadError => e
 end
 
 Rails.configuration.to_prepare do
+  # Загружаем сервис снимков до регистрации обработчика хука.
+  require File.expand_path('lib/document_generator/issue_list_snapshot.rb', __dir__)
   require File.expand_path('lib/document_generator/hooks.rb', __dir__)
 end
 
@@ -42,7 +44,7 @@ Redmine::Plugin.register :redmine_document_generator do
   author 'Андрей Якушев'
   author_url 'https://a2ya.ru'
   description 'Генератор документов Word и Excel по выборке записей проекта с использованием шаблонов'
-  version '0.9.1'
+  version '0.10.0'
   url 'https://github.com/selfauthor/redmine_document_generator'
   requires_redmine version_or_higher: '6.0.0'
 
@@ -57,3 +59,4 @@ Redmine::Plugin.register :redmine_document_generator do
                require: :member
   end
 end
+# v2610141223
