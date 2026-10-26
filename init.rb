@@ -44,7 +44,7 @@ Redmine::Plugin.register :redmine_document_generator do
   author 'Андрей Якушев'
   author_url 'https://a2ya.ru'
   description 'Генератор документов Word и Excel по выборке записей проекта с использованием шаблонов'
-  version '0.10.0'
+  version '1.0.0'
   url 'https://github.com/selfauthor/redmine_document_generator'
   requires_redmine version_or_higher: '6.0.0'
 
@@ -59,4 +59,4 @@ Redmine::Plugin.register :redmine_document_generator do
                require: :member
   end
 end
-# v2610141223
+# v2610261513

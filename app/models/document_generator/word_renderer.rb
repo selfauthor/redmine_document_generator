@@ -305,39 +305,52 @@ module DocumentGenerator
     # @param records [Array<Hash>] Массив записей для цикла
     # @param ns [Hash] Пространства имен XML
     def process_row_blocks(doc, context, records, ns)
-      # Находим все узлы (строки таблиц или абзацы)
-      all_nodes = doc.xpath('//w:tr | //w:p[not(ancestor::w:tr)]', ns)
-      start_node = nil
-      end_node = nil
-      template_nodes = []
-      in_block = false
-      
-      # Ищем блок BEGIN_ROW/END_ROW
-      all_nodes.each do |node|
-        text = node.xpath('.//w:t', ns).map(&:text).join
-        if !in_block && text.include?('<%BEGIN_ROW%>')
-          # Начало блока
-          in_block = true
-          start_node = node
-          template_nodes << node
-          if text.include?('<%END_ROW%>')
-            # BEGIN_ROW и END_ROW в одном узле
-            end_node = node
-            in_block = false
-            break
-          end
-        elsif in_block
-          template_nodes << node
-          if text.include?('<%END_ROW%>')
-            end_node = node
-            in_block = false
-            break
+      # Используем цикл для обработки всех блоков BEGIN_ROW/END_ROW в документе,
+      # аналогично тому, как это реализовано в Excel-рендерере.
+      loop do
+        # Находим все узлы (строки таблиц или абзацы)
+        # Используем to_a, так как коллекция будет изменяться в процессе итерации
+        all_nodes = doc.xpath('//w:tr | //w:p[not(ancestor::w:tr)]', ns).to_a
+        
+        start_node = nil
+        end_node = nil
+        template_nodes = []
+        in_block = false
+        
+        # Ищем блок BEGIN_ROW/END_ROW
+        all_nodes.each do |node|
+          text = node.xpath('.//w:t', ns).map(&:text).join
+          
+          # Используем регулярное выражение с учетом возможных пробелов, 
+          # как в Excel-рендерере, для большей надежности
+          if !in_block && text.match?(/<%\s*BEGIN_ROW\s*%>/i)
+            # Начало блока
+            in_block = true
+            start_node = node
+            
+            # Управляющий узел не добавляем в template_nodes, чтобы он не клонировался
+            if text.match?(/<%\s*END_ROW\s*%>/i)
+              # BEGIN_ROW и END_ROW находятся в одном узле
+              end_node = node
+              in_block = false
+              break
+            end
+          elsif in_block
+            if text.match?(/<%\s*END_ROW\s*%>/i)
+              end_node = node
+              in_block = false
+              break
+            else
+              # В шаблон для клонирования добавляем только узлы, 
+              # находящиеся строго между BEGIN_ROW и END_ROW
+              template_nodes << node
+            end
           end
         end
-      end
-      
-      # Проверяем, что блок найден корректно
-      if start_node && end_node
+        
+        # Если блок не найден, завершаем цикл обработки
+        break unless start_node && end_node
+        
         if start_node.parent != end_node.parent
           error_msg = I18n.t('document_generator.error_row_block_mismatch')
           raise DocumentGenerator::TemplateError, error_msg
@@ -345,12 +358,17 @@ module DocumentGenerator
         
         parent = start_node.parent
         
-        # Удаляем шаблонные узлы
+        # Удаляем управляющие узлы (BEGIN_ROW и END_ROW) из документа, 
+        # чтобы они не оставались в виде пустых строк после подстановки значений
+        start_node.remove
+        end_node.remove unless end_node == start_node
+        
+        # Удаляем шаблонные узлы из документа (они будут добавлены как клоны)
         template_nodes.each(&:remove)
         
         # НЕ вызываем clean_node_text здесь! Маркеры ELSE и END нужны для process_conditionals_in_block
         
-        # Для каждой записи создаем клон
+        # Для каждой записи создаем клон только тела цикла (без управляющих маркеров)
         records.each_with_index do |record, record_idx|
           begin
             merged_context = context.merge(record)
@@ -401,9 +419,6 @@ module DocumentGenerator
             next
           end
         end
-      else
-        error_msg = I18n.t('document_generator.error_missing_end_row')
-        raise DocumentGenerator::TemplateError, error_msg
       end
     end
 
@@ -784,4 +799,4 @@ module DocumentGenerator
     end
   end
 end
-# v2610131547
+# v2610261408
